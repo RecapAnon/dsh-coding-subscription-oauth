@@ -144,7 +144,12 @@ function profile(
 		modelErrors: new Map(),
 		...REQUEST_IMAGE_POLICY,
 		...(headers === undefined ? {} : { headers }),
-		piProvider,
+		// `piProvider` is optional from dsh-llm-pi-ai 0.1.7 onward (a stored route
+		// that cannot be constructed stays editable), so under
+		// `exactOptionalPropertyTypes` the key must be omitted rather than set to
+		// `undefined`. Host builds that still declare it required are unaffected:
+		// this helper only ever omits it when the caller had no provider to pass.
+		...(piProvider === undefined ? {} : { piProvider }),
 	};
 }
 

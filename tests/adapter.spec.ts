@@ -362,11 +362,29 @@ describe("createCodingOAuthAdapter model discovery", () => {
 	});
 
 	it("injects Fast routing only on the Fast profile while keeping native wire identity", async () => {
-		const attachmentPolicies: Array<{ maxPixels?: number; maxBytes?: number }> = [];
+		// dsh-attachment 0.1.7 asks for a resolved `ImageRequestTarget` (the
+		// dimensions already projected under the route's pixel budget) instead of
+		// the raw `{ maxPixels, maxBytes }` policy, and `RequestImageAttachment`
+		// now carries the exact encoded byte count the route budgets against.
+		const attachmentTargets: Array<{ width: number; height: number; maxBytes: number }> = [];
 		const attachments = {
-			readImageRequest: async (_ref: unknown, policy: { maxPixels?: number; maxBytes?: number }) => {
-				attachmentPolicies.push(policy);
-				return { type: "image", data: new Uint8Array([137, 80, 78, 71]), mediaType: "image/png" };
+			readImageRequest: async (
+				ref: { attachmentId: string },
+				target: { width: number; height: number; maxBytes: number },
+			) => {
+				attachmentTargets.push(target);
+				return {
+					variantId: `${ref.attachmentId}-request`,
+					attachment: ref,
+					data: new Uint8Array([137, 80, 78, 71]),
+					mediaType: "image/png",
+					bytes: 4,
+					width: target.width,
+					height: target.height,
+					depth: "uchar",
+					space: "srgb",
+					hasAlpha: false,
+				};
 			},
 		};
 		const dir = await mkdtemp(join(tmpdir(), "dsh-coding-oauth-fast-stream-"));
@@ -441,8 +459,11 @@ describe("createCodingOAuthAdapter model discovery", () => {
 									attachmentId: AttachmentId("attachment-policy"),
 									mediaType: "image/png",
 									bytes: 4,
-									width: 1,
-									height: 1,
+									// Deliberately above the route pixel budget so the projected
+									// target proves the budget was applied; a 1x1 source would be
+									// passed through unchanged and assert nothing.
+									width: 4096,
+									height: 4096,
 								},
 							},
 						],
@@ -466,9 +487,11 @@ describe("createCodingOAuthAdapter model discovery", () => {
 		await expect(fast?.options?.onPayload?.({ model: eligibleId }, { id: eligibleId })).resolves.toMatchObject({
 			service_tier: "priority",
 		});
-		expect(attachmentPolicies).toEqual([
-			{ maxPixels: 2048 * 2048, maxBytes: 1024 * 1024 },
-			{ maxPixels: 2048 * 2048, maxBytes: 1024 * 1024 },
+		// 4096x4096 projected under requestImagePixelBudget (2048*2048) is 2048x2048,
+		// so both budgets in REQUEST_IMAGE_POLICY are proven to reach the store.
+		expect(attachmentTargets).toEqual([
+			{ width: 2048, height: 2048, maxBytes: 1024 * 1024 },
+			{ width: 2048, height: 2048, maxBytes: 1024 * 1024 },
 		]);
 		const replayState = {
 			response: {

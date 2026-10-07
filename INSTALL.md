@@ -17,12 +17,12 @@ dsh plugin --profile web update dsh-coding-subscription-oauth
 
 ## 前置条件
 
-- DeepSeek Harness `0.1.1-rc.2`（精确已验证 BOM，见 `compatibility/dsh-bom.json`）
+- DeepSeek Harness `0.1.x`（peer 接受 `^0.1.1-rc.2`；已验证 BOM 为 `0.1.7-rc.2`，见 `compatibility/dsh-bom.json`）
 - Node.js 22.19+
 - 需要使用的个人编码订阅；没有 Claude/Google 账号也可以先安装路由
 - 部分网络需要 HTTP/HTTPS 代理
 
-`0.1.2-alpha.*` 与 `0.1.5-rc.1` 可作为 BOM **未验证候选**出现，但不是生产 pin。在把候选提升为 `verified` 之前，不要把它们当作正式兼容声明。面向 `0.1.5-rc.1` 的客户端 inject 已不再要求 `@deepseek-ai/dsh-client-runtime`（该包在候选宿主上不存在）；缺失的可选 inject 仍为 soft diagnostic。OAuth provider profile 会初始化空的 `modelErrors` map，避免候选宿主在模型解析时对 undefined 调用 `.get`（见 `#38`）。
+`0.2.0-rc.1` 等 `0.2` 及以上版本记为 BOM **未验证候选**，不在 peer 接受范围内。在把候选提升为 `verified` 之前，不要把它们当作正式兼容声明。面向 `0.1.5-rc.1` 的客户端 inject 已不再要求 `@deepseek-ai/dsh-client-runtime`（该包在候选宿主上不存在）；缺失的可选 inject 仍为 soft diagnostic。OAuth provider profile 会初始化空的 `modelErrors` map，避免候选宿主在模型解析时对 undefined 调用 `.get`（见 `#38`）。
 
 ## 安装
 
@@ -44,7 +44,7 @@ dsh plugin --profile web add dsh-agy@0.1.2
 
 ## 升级注意事项
 
-- 本版按 DSH `0.1.1-rc.2` 的精确兼容矩阵发布；生产环境应锁定已验证的 BOM，不要用 `*` 或未验证的宽泛 peer range。候选宿主（如 `0.1.5-rc.1`）只记在 `candidates[]`，须经隔离冒烟后再考虑提升。
+- 本版在 DSH `0.1.7-rc.2` 上验证，peer 声明为 `^0.1.1-rc.2`，因此整条 `0.1.x` 线都能直接启动，不再需要 `dsh plugin allow-version` 豁免。**不要**把 peer 改回单一精确版本：DSH 在 profile 启动时用 `semver.satisfies(runtimeVersion, range, { includePrerelease: true })` 校验 peer，精确 pin 等于「只允许这一个 DSH 版本」，之后每次 DSH 升级都会拒绝本插件。已测版本仍精确记录在 `compatibility/dsh-bom.json`。`0.2` 及以上只记在 `candidates[]`，须经隔离冒烟后再考虑提升。
 - 从 `0.6.0` 升级到 `0.6.2` 后再重启：`0.6.0` 在严格 Cordis 注入检查下可能因读取尚未注入的可选服务而拖垮插件树。这个补丁不迁移或重置 OAuth 凭据、Gateway、模型/适配器 ID 与缓存。
 - 从 `0.6.3` 升级到 `0.6.4`：统一固定 `dsh-coding-oauth-core@0.1.2` 与 `undici@7.29.0`；无配置、凭据、数据或路由迁移。
 - 从 `0.7.1` 升级到 `0.8.0`：可选 OpenCode Go 兼容（`gateway.opencodeGo.enabled`，默认关）；无配置/凭据/路由迁移。

@@ -117,9 +117,11 @@ the workflow never publishes a second copy. A missing version or mismatched
 
 ## New DSH release smoke checklist
 
-The plugin verifies an exact DeepSeek Harness BOM (`compatibility/dsh-bom.json`). A new DSH rc/stable is **unverified by default**, and lifecycle drift has broken activation before (#17), so run this checklist before moving the pin — in order, stopping at the first failure:
+The plugin records an exact DeepSeek Harness BOM (`compatibility/dsh-bom.json`) for the host it was built and tested against, and separately accepts a range of hosts through `supportedDshRange` / `peerDependencies`. A DSH release **outside** that range is unverified by default, and lifecycle drift has broken activation before (#17), so run this checklist before widening the range — in order, stopping at the first failure.
 
-1. **Sandbox or isolated cloud first.** Prefer `pnpm run check` on Node matching `.nvmrc` in Cursor Cloud / an isolated `DSH_HOME`. Docker remains optional: edit the hardcoded `@deepseek-ai/dsh@0.1.1-rc.2` pin in `Dockerfile` (`dsh-installed` / `rc2-compatibility` stages — there is no build-arg) to the candidate DSH version, then build those targets green. This catches activation/lifecycle breakage without touching a real profile.
+Never respond to a startup denial by pinning peers to one exact DSH version: DSH checks peers against the **runtime** version with `includePrerelease`, so an exact pin means "only this one build" and every later release denies the plugin. Move the verified BOM forward and widen `supportedDshRange` instead; `pnpm run check` and `tests/compatibility.spec.ts` enforce this.
+
+1. **Sandbox or isolated cloud first.** Prefer `pnpm run check` on Node matching `.nvmrc` in Cursor Cloud / an isolated `DSH_HOME`. Docker remains optional: edit the hardcoded `@deepseek-ai/dsh@0.1.7-rc.2` pin in `Dockerfile` (`dsh-installed` / `rc2-compatibility` stages — there is no build-arg) to the candidate DSH version, then build those targets green. This catches activation/lifecycle breakage without touching a real profile.
 2. **Real profile install (maintainer machine).** Install the candidate tarball into an existing `dsh web` profile and restart that process once; the plugin must activate with only `webServer` required and no Cordis injection failures in the logs.
 3. **Settings surface.** Settings → Coding OAuth renders all four tabs (Accounts / Gateway / Capabilities / About).
 4. **Credentials survive.** Every previously signed-in provider card (Grok / Codex / Kimi / Claude) still shows signed-in — an upgrade must never migrate or reset OAuth credential files.

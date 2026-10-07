@@ -2,12 +2,12 @@
 
 Tracker: [#29](https://github.com/lninghaha/dsh-coding-subscription-oauth/issues/29)
 
-Use this cadence for hosts listed under `compatibility/dsh-bom.json` → `candidates[]` (today: `0.1.2-alpha.*`, `0.1.5-rc.1`). A candidate is **not** the production pin.
+Use this cadence for hosts listed under `compatibility/dsh-bom.json` → `candidates[]` (today: `0.2.0-rc.1`). A candidate is a host **outside** `supportedDshRange`; hosts inside that range already start the plugin and need no ceremony.
 
 ## Rules
 
 - Isolated `DSH_HOME=/tmp/dsh-verify-sub-<ver>` only.
-- Prefix-install the candidate CLI; do **not** overwrite the global verified `0.1.1-rc.2` pin.
+- Prefix-install the candidate CLI; do **not** overwrite the operator's installed DSH.
 - High port (default `18381`); never `3080`.
 - Never restart operator `dsh-web`.
 - Do **not** use `smoke:deployed` for this cadence (touches real sessions).
@@ -20,7 +20,7 @@ pnpm run assert:node
 pnpm run smoke:dsh-alpha
 ```
 
-## Manual path (`0.1.5-rc.1` or other candidates)
+## Manual path (`0.2.0-rc.1` or other candidates)
 
 1. Prefix-install: `npm install --prefix /tmp/dsh-cli-$VER @deepseek-ai/dsh@$VER`
 2. `export DSH_HOME=/tmp/dsh-verify-sub-$VER`
@@ -33,6 +33,6 @@ pnpm run smoke:dsh-alpha
 
 1. Loopback `Host` gateway reveal → allowed (non-403)
 2. Non-loopback `Host` → **403**
-3. On `0.1.5-rc.1`: no Cordis startup failure from a stale `dsh-client-runtime` inject requirement
+3. No Cordis startup failure and no `allow-version` exemption prompt
 
-Production pin remains `0.1.1-rc.2` until deliberately promoted.
+A candidate outside `supportedDshRange` requires an explicit exemption to boot. Once a candidate is promoted, widen `supportedDshRange`, move the host into `verified`, and re-run `pnpm run check` — do **not** answer a startup denial by reintroducing an exact peer pin.

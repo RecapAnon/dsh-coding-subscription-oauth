@@ -24,6 +24,32 @@ describe("DSH compatibility contracts", () => {
 		expect(matrix.candidates.every((candidate) => candidate.status === "unverified")).toBe(true);
 	});
 
+	it("accepts a window of DSH hosts so a runtime upgrade cannot deny the plugin at startup", async () => {
+		// DSH evaluates `peerDependencies` at profile startup with
+		// `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`
+		// against the *runtime* version. An exact pin therefore means "only this
+		// one DSH build", and every later release denies the plugin until a human
+		// grants an exact-version exemption. Keep the tested versions in the BOM
+		// and accept a range here instead.
+		const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as {
+			peerDependencies: Record<string, string>;
+		};
+		const matrix = JSON.parse(await readFile(new URL("../compatibility/dsh-bom.json", import.meta.url), "utf8")) as {
+			supportedDshRange: string;
+		};
+		const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+		const dshPeers = Object.entries(manifest.peerDependencies).filter(
+			([name]) => name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-"),
+		);
+
+		expect(dshPeers.length).toBeGreaterThan(0);
+		expect(matrix.supportedDshRange).not.toMatch(exactVersion);
+		for (const [name, range] of dshPeers) {
+			expect(range, `${name} must accept a range, not one exact DSH release`).not.toMatch(exactVersion);
+			expect(range, `${name} must reuse the shared supportedDshRange`).toBe(matrix.supportedDshRange);
+		}
+	});
+
 	it("reports missing host APIs before participant activation", () => {
 		const adapter = createDshHostAdapter({} as Context);
 		expect(adapter.participantId).toBe("coding-subscription-oauth");

@@ -90,10 +90,12 @@ for (const name of requiredRuntimePeers) {
 		true,
 		`runtime peer must be required (pnpm auto-installs it in the profile): ${name}`,
 	);
-	assert.equal(
-		manifest.peerDependencies?.[name] === "*" || /^[~^]/.test(manifest.peerDependencies?.[name] ?? ""),
-		false,
-		`runtime peer must pin an exact resolvable version (not "*" or a range): ${name}`,
+	const peerRange = manifest.peerDependencies?.[name] ?? "";
+	assert.notEqual(peerRange, "*", `runtime peer must constrain a version window, not "*": ${name}`);
+	assert.doesNotMatch(
+		peerRange,
+		/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u,
+		`runtime peer must accept a range, not an exact pin (an exact pin makes every later DSH release deny the plugin at profile startup): ${name}`,
 	);
 }
 for (const marker of [

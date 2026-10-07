@@ -4,6 +4,17 @@ All notable changes to `dsh-coding-subscription-oauth` are documented here, foll
 
 ## Unreleased
 
+### Fixed
+
+- Accept a range of DSH hosts instead of one exact build. Every `@deepseek-ai/dsh-*` peer was pinned to the exact version `0.1.1-rc.2`, and DSH evaluates peers at profile startup with `semver.satisfies(runtimeVersion, range, { includePrerelease: true })` against the **runtime** version. The pin therefore meant "only dsh 0.1.1-rc.2", so dsh `0.1.7-rc.2` refused to start the plugin until a human ran `dsh plugin allow-version`. Peers now declare the shared `supportedDshRange` (`^0.1.1-rc.2`), which covers the whole `0.1` line and stops at `0.2.0`.
+- Omit `piProvider` instead of assigning `undefined`. `dsh-llm-pi-ai` made `ResolvedPiAiProviderProfile.piProvider` optional, which fails under `exactOptionalPropertyTypes`.
+
+### Changed
+
+- Re-verify the BOM against DSH `0.1.7-rc.2`: `@deepseek-ai/dsh-*` `0.1.7-rc.2`, `@deepseek-ai/cordis` `4.0.4`, `@deepseek-ai/schemastery` `3.18.4`, `@earendil-works/pi-ai` `0.85.1` (the stale `0.84.2` override in `pnpm-workspace.yaml` conflicted with the host's `^0.85.1`).
+- Split the compatibility contract: `compatibility/dsh-bom.json` and `devDependencies` keep exact tested versions, while `peerDependencies` carry the accepted host range. `build/verify-dsh-bom.mjs` and `build/verify-release.mjs` now reject an exact DSH peer pin rather than requiring one, and `tests/compatibility.spec.ts` guards against a regression.
+- Update the `adapter.spec.ts` image fixture to the `ImageRequestTarget` / `RequestImageAttachment` contract, asserting the projected `2048x2048` target so the route's pixel budget stays covered.
+
 ## v0.8.5 - 2026-09-15
 
 ### Fixed
