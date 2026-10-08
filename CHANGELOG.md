@@ -15,6 +15,7 @@ All notable changes to `dsh-coding-subscription-oauth` are documented here, foll
 - Omit `piProvider` from a resolved pi-ai provider profile instead of passing an explicit `undefined`, which `exactOptionalPropertyTypes` rejects on `dsh-llm-pi-ai` 0.2.0-rc.2.
 - Type replayed gateway tool-call arguments as pi-ai's `JsonObject`, matching the tightened `ToolCall` contract in pi-ai 0.87.
 - Build provider-stream test contexts through `normalizeContext()` and report the attachment request version's exact `bytes`, so the new request-image budget guard sees a real size instead of demanding an offload.
+- Stream local gateway Grok models through the Grok Build request provider with a `normalizeContext()` transcript, the resolved OAuth token, and the CLI fingerprint headers, instead of asking the xai login collection for an inference provider it never registers.
 
 ### Fixed
 
