@@ -8,6 +8,7 @@ All notable changes to `dsh-coding-subscription-oauth` are documented here, foll
 
 - Verify against DeepSeek Harness `0.2.0-rc.2`: the exact BOM now pins `@deepseek-ai/dsh-*@0.2.0-rc.2`, `@deepseek-ai/cordis@4.0.4`, `@deepseek-ai/schemastery@3.18.4`, and `@earendil-works/pi-ai@0.87.1`, so the host compatibility gate accepts the plugin again.
 - Serve the capability flags as a volatile plugin Config field (`capabilities`) addressed by the composed profile entry id. DSH 0.2.x removed the dynamic `settings.register()` namespace, so reads come from the live volatile section and writes go through the entry form model (`describe`/`mutate`), persisting into the profile's `cordis.patch.yml`; the 0.1.x register path is unchanged.
+- Add Claude Haiku 5.5 (`claude-haiku-5-5`, extending `claude-haiku-4-5`) as a reviewed Claude Code model addition: 1M context, 128K output, adaptive thinking with five effort levels, and no `temperature` (only `1` is accepted). API price estimates use the conservative long-context tier.
 
 ### Fixed
 
