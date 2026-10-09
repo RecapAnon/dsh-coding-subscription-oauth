@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { OpenCodeGoConnectionView, type GoSnapshot, type GoViewProps } from "../src/client/components/OpenCodeGoConnectionView.tsx";
 import { buttonStyle, cardStyle } from "../src/client/styles.ts";
@@ -204,4 +204,29 @@ it("keeps load errors and retry accessible before the connection has loaded", as
 	// As before the fold, there is nothing to edit until a snapshot loads; the details region stays hidden.
 	expect(screen.queryByRole("button", { name: "edit" })).toBeNull();
 	expect(document.querySelector("article [hidden]")).not.toBeNull();
+});
+
+it("reopens the form from the inner Edit button after Apply or Cancel while details stay expanded", async () => {
+	const input = props();
+	render(createElement(OpenCodeGoConnectionView, input));
+	const toggle = screen.getByRole("button", { name: "edit" });
+	const details = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+	fireEvent.click(toggle);
+	expect(toggle.textContent).toBe("collapse");
+	// While the form is open the details region offers no separate Edit button.
+	expect(within(details).queryByRole("button", { name: "edit" })).toBeNull();
+	fireEvent.click(within(details).getByRole("button", { name: "apply" }));
+	await waitFor(() => expect(input.onApply).toHaveBeenCalledOnce());
+	const innerEdit = await within(details).findByRole("button", { name: "edit" });
+	expect(innerEdit).not.toBe(toggle);
+	expect(screen.queryByLabelText("credential")).toBeNull();
+	expect(toggle.getAttribute("aria-expanded")).toBe("true");
+	fireEvent.click(innerEdit);
+	expect(within(details).getByLabelText("credential")).toBeTruthy();
+	expect(toggle.getAttribute("aria-expanded")).toBe("true");
+	fireEvent.click(within(details).getByRole("button", { name: "cancel" }));
+	await waitFor(() => expect(input.onReload).toHaveBeenCalledOnce());
+	fireEvent.click(await within(details).findByRole("button", { name: "edit" }));
+	expect(within(details).getByLabelText("credential")).toBeTruthy();
+	expect(details.hidden).toBe(false);
 });

@@ -50,11 +50,9 @@ export function OpenCodeGoCard({
 			{...(error ? { loadError: error } : {})}
 			t={(key, params) =>
 				t(
-					(key === "collapse"
-						? "collapseModels"
-						: key.startsWith("status.")
-							? "opencodeGoStatus." + key.slice(7)
-							: "opencodeGo" + key[0]!.toUpperCase() + key.slice(1)) as GrokBuildSettingsKey,
+					(key.startsWith("status.")
+						? "opencodeGoStatus." + key.slice(7)
+						: "opencodeGo" + key[0]!.toUpperCase() + key.slice(1)) as GrokBuildSettingsKey,
 					params,
 				)
 			}

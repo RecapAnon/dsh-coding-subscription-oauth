@@ -30,6 +30,7 @@ export const en = {
 	opencodeGoReload: "Load latest settings and keep input",
 	opencodeGoCancel: "Discard edits",
 	opencodeGoEdit: "Edit connection",
+	opencodeGoCollapse: "Hide connection details",
 	accountReauthorize: "Authorize again",
 	accountReauthorizeHint:
 		"Update only this account without changing the default. If the service does not disclose identity, verify this account on its authorization page.",
@@ -440,6 +441,7 @@ export const zh: { [Key in GrokBuildSettingsKey]: string } = {
 	opencodeGoReload: "读取最新配置并保留输入",
 	opencodeGoCancel: "取消修改",
 	opencodeGoEdit: "修改连接",
+	opencodeGoCollapse: "收起连接详情",
 	accountReauthorize: "重新授权",
 	accountReauthorizeHint: "仅更新此账户授权，不切换默认账户。若服务不提供身份，请在授权页面确认使用的是此账户。",
 	nav: "账户与模型",
