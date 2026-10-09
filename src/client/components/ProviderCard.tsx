@@ -3,7 +3,7 @@ import { AccountReauthorization } from "./AccountReauthorization.tsx";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { SOURCE_REASON_KEY } from "../constants.ts";
-import { methodLabel, orderedLoginMethods, shouldShowPerCardSourceReason } from "../display.ts";
+import { methodLabel, orderedLoginMethods, shouldShowPerCardSourceReason, usageWindowLabelKey } from "../display.ts";
 import { formatEpoch, looksSecret, modelFields, usageHasVisibleFields } from "../parsers.ts";
 import {
 	bodyStyle,
@@ -38,6 +38,7 @@ import type {
 import { Badge } from "./Badge.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { ProgressBar } from "./ProgressBar.tsx";
+import { ProviderIcon } from "./ProviderIcons.tsx";
 
 export interface ProviderCardProps {
 	capabilitiesPanel?: ReactNode;
@@ -260,12 +261,15 @@ export function ProviderCard({
 		return available.filter((id) => id.toLowerCase().includes(query));
 	}, [available, modelFilter]);
 
-	const usagePercent =
-		definition.slug === "codex" && showUsage
-			? usage?.individualRemainingPercent === undefined
-				? usage?.rateLimits[0]?.windows[0]?.usedPercent
-				: 100 - usage.individualRemainingPercent
-			: undefined;
+	const isUsageActive =
+		(definition.slug === "codex" && showUsage) || (definition.slug === "kimi" && showUsage && usage !== undefined);
+	// The aggregate bar is only a distinct metric when the vendor reports a spend
+	// / individual limit. Otherwise it duplicated `rateLimits[0]`, which is how the
+	// Kimi card ended up drawing its 5-hour window twice.
+	const individualPercent =
+		usage?.individualRemainingPercent === undefined ? undefined : 100 - usage.individualRemainingPercent;
+	const usagePercent = isUsageActive ? (individualPercent ?? usage?.rateLimits[0]?.windows[0]?.usedPercent) : undefined;
+	const individualResetsAt = formatEpoch(usage?.individualResetsAt);
 	const fetchedAt = formatEpoch(usage?.fetchedAt);
 
 	return (
@@ -276,21 +280,24 @@ export function ProviderCard({
 				</p>
 			) : null}
 			<div style={rowStyle}>
-				<div>
-					<h3 style={{ ...titleStyle, fontSize: 16 }}>{t(definition.titleKey)}</h3>
-					{providerStatus.status === "signed-in" && !expanded ? (
-						<p style={{ ...hintStyle, marginTop: 4 }}>
-							{t("modelsSummary", { selected: selected.length, total: available.length })}
-							{usagePercent === undefined ? "" : ` · ${t("usageUsedShort", { value: `${String(usagePercent)}%` })}`}
-						</p>
-					) : (
-						<>
-							<p style={{ ...bodyStyle, marginTop: 4 }}>{t(definition.descriptionKey)}</p>
-							<p style={{ ...bodyStyle, marginTop: 4 }}>
-								<span style={monoStyle}>{definition.route}</span>
+				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+					<ProviderIcon kind={definition.slug} size={20} />
+					<div>
+						<h3 style={{ ...titleStyle, fontSize: 16 }}>{t(definition.titleKey)}</h3>
+						{providerStatus.status === "signed-in" && !expanded ? (
+							<p style={{ ...hintStyle, marginTop: 4 }}>
+								{t("modelsSummary", { selected: selected.length, total: available.length })}
+								{usagePercent === undefined ? "" : ` · ${t("usageUsedShort", { value: `${String(usagePercent)}%` })}`}
 							</p>
-						</>
-					)}
+						) : (
+							<>
+								<p style={{ ...bodyStyle, marginTop: 4 }}>{t(definition.descriptionKey)}</p>
+								<p style={{ ...bodyStyle, marginTop: 4 }}>
+									<span style={monoStyle}>{definition.route}</span>
+								</p>
+							</>
+						)}
+					</div>
 				</div>
 				<Badge label={statusLabel} providerStatus={observed.status} />
 			</div>
@@ -532,7 +539,7 @@ export function ProviderCard({
 												alignItems: "center",
 												justifyContent: "space-between",
 												padding: "6px 0",
-												borderBottom: "1px solid var(--dsw-alias-border-subtle, #e5e5e5)",
+												borderBottom: "0.5px solid var(--dsw-alias-border-l2)",
 											}}
 										>
 											<span style={bodyStyle}>
@@ -733,9 +740,11 @@ export function ProviderCard({
 					{grokProviderStatus?.status === "signed-in" && grokProviderStatus.catalogError !== undefined ? (
 						<p style={{ ...bodyStyle, color: "var(--dsw-alias-state-error-primary)" }}>{t("catalogError")}</p>
 					) : null}
-					{definition.slug === "codex" && showUsage ? (
+					{isUsageActive ? (
 						<div style={nestedStyle}>
-							<p style={{ ...bodyStyle, color: "var(--dsw-alias-label-primary)" }}>{t("usageTitle")}</p>
+							<p style={{ ...bodyStyle, color: "var(--dsw-alias-label-primary)" }}>
+								{t(definition.slug === "kimi" ? "kimiUsageTitle" : "usageTitle")}
+							</p>
 							{usageError === undefined ? null : (
 								<p style={{ ...bodyStyle, color: "var(--dsw-alias-state-error-primary)" }} role="alert">
 									{usageError}
@@ -748,34 +757,49 @@ export function ProviderCard({
 							) : (
 								<>
 									{fetchedAt === undefined ? null : <p style={hintStyle}>{t("usageFetchedAt", { time: fetchedAt })}</p>}
-									{usagePercent !== undefined ? (
+									{individualPercent === undefined || !isUsageActive ? null : (
 										<ProgressBar
-											value={usagePercent}
-											label={t("usageRateLimit")}
-											meta={t("usageUsed", { value: `${String(usagePercent)}%` })}
+											value={individualPercent}
+											label={t("usageIndividualLimit")}
+											meta={
+												individualResetsAt === undefined
+													? t("usageUsed", { value: `${String(individualPercent)}%` })
+													: `${t("usageUsed", { value: `${String(individualPercent)}%` })} · ${t("usageResets", { time: individualResetsAt })}`
+											}
 										/>
-									) : null}
+									)}
 									{usage.rateLimits.map((limit) => {
-										const window = limit.windows[0];
-										const used = window?.usedPercent;
-										const resetsAt = formatEpoch(window?.resetsAt);
-										return (
-											<div key={limit.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-												{used === undefined ? (
-													<p style={hintStyle}>{limit.name ?? t("usageRateLimit")}</p>
-												) : (
-													<ProgressBar
-														value={used}
-														label={limit.name ?? t("usageRateLimit")}
-														meta={
-															resetsAt === undefined
-																? t("usageUsed", { value: `${String(used)}%` })
-																: `${t("usageUsed", { value: `${String(used)}%` })} · ${t("usageResets", { time: resetsAt })}`
-														}
-													/>
-												)}
-											</div>
-										);
+										const named = limit.name;
+										// Codex packs `primary_window` + `secondary_window` into one
+										// limit, so read every window instead of dropping the weekly one.
+										const rows = limit.windows.length === 0 ? [undefined] : limit.windows;
+										return rows.map((window, windowIndex) => {
+											const used = window?.usedPercent;
+											const resetsAt = formatEpoch(window?.resetsAt);
+											const windowLabel = t(usageWindowLabelKey(window?.windowSeconds));
+											const label =
+												named === undefined ? windowLabel : rows.length === 1 ? named : `${named} · ${windowLabel}`;
+											return (
+												<div
+													key={`${limit.id}-${String(windowIndex)}`}
+													style={{ display: "flex", flexDirection: "column", gap: 4 }}
+												>
+													{used === undefined ? (
+														<p style={hintStyle}>{label}</p>
+													) : (
+														<ProgressBar
+															value={used}
+															label={label}
+															meta={
+																resetsAt === undefined
+																	? t("usageUsed", { value: `${String(used)}%` })
+																	: `${t("usageUsed", { value: `${String(used)}%` })} · ${t("usageResets", { time: resetsAt })}`
+															}
+														/>
+													)}
+												</div>
+											);
+										});
 									})}
 								</>
 							)}
@@ -785,13 +809,24 @@ export function ProviderCard({
 			) : null}
 			{capabilitiesPanel === undefined ? null : (
 				<details
+					style={{ borderTop: "0.5px solid var(--dsw-alias-border-l2)", paddingTop: 8 }}
 					onToggle={(event) => {
 						setAdvancedOpen(event.currentTarget.open);
 						if (event.currentTarget.open) onLoadCapabilities?.();
 					}}
 				>
-					<summary>{t("capabilitiesTitle")}</summary>
-					{advancedOpen ? capabilitiesPanel : null}
+					<summary
+						style={{
+							...bodyStyle,
+							fontWeight: 500,
+							cursor: "pointer",
+							color: "var(--dsw-alias-label-secondary)",
+							padding: "4px 0",
+						}}
+					>
+						{t("capabilitiesTitle")}
+					</summary>
+					{advancedOpen ? <div style={{ paddingTop: 8 }}>{capabilitiesPanel}</div> : null}
 				</details>
 			)}
 		</div>

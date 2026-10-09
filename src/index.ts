@@ -30,6 +30,7 @@ import {
 	type CapabilitySettingsPatch,
 	CapabilitySettingsSchema,
 	type CapabilitySettingsService,
+	type CapabilityVolatileSection,
 	createCapabilitySettingsController,
 	resolveCapabilitySettings,
 } from "./capability-settings.ts";
@@ -65,6 +66,8 @@ import {
 	XAI_PI_PROVIDER,
 } from "./ids.ts";
 import { registerImagineRoutes } from "./imagine-routes.ts";
+import { createKimiSearchProvider } from "./kimi-search.ts";
+import { createKimiUsageReader, kimiAuthFromSession } from "./kimi-usage.ts";
 import { MediaStore } from "./media-store.ts";
 import {
 	type OAuthImportDestinationStore,
@@ -82,6 +85,11 @@ import {
 } from "./opencode-go-connection.ts";
 import { installOpenCodeGoHeaderCompatibility, OpenCodeGoHeaderState } from "./opencode-go-header.ts";
 import { acquireCodingOAuthProxy } from "./proxy.ts";
+import {
+	createSearchProviderSettings,
+	type SearchProviderConfigEditor,
+	type SearchProviderRegistry,
+} from "./search-provider-settings.ts";
 import { GrokBuildSession } from "./session.ts";
 import { GrokBuildCredentialStore, type OAuthCredentialFileStore } from "./store.ts";
 import { createOwnerRequestPolicy, safeguardOwnerRequestPolicy } from "./web-origin.ts";
@@ -277,7 +285,7 @@ export interface Config {
 	 */
 	retryPolicy?: RetryPolicyConfig;
 	/** Secret-free composition/YAML defaults below live user settings. */
-	capabilities?: CapabilitySettingsPatch;
+	capabilities?: CapabilitySettingsPatch | CapabilityVolatileSection<CapabilitySettingsPatch>;
 	/** Opt-in isolated local OpenAI-compatible gateway. Default off. */
 	gateway?: Partial<GatewayConfig>;
 	/** Owner-only request authorization for loopback, SSH tunnels, and trusted HTTPS proxies. */
@@ -292,11 +300,44 @@ export interface Config {
 	};
 }
 
-export const Config: z<Config> = z.object({
+/**
+ * Whether a Config field arrived as a 0.2.x volatile reference instead of a value.
+ * @param value - the raw `config.capabilities` field.
+ */
+function isVolatileSection(value: unknown): value is CapabilityVolatileSection<CapabilitySettingsPatch> {
+	return typeof value === "object" && value !== null && typeof (value as { get?: unknown }).get === "function";
+}
+
+/**
+ * Read the capability section out of a Config field that is volatile on 0.2.x (a live
+ * reference committed by the running fiber) and a plain parsed object on 0.1.x.
+ * @param value - the raw `config.capabilities` field.
+ * @returns the current section, or undefined when the field is absent.
+ */
+function readCapabilitySection(value: Config["capabilities"]): CapabilitySettingsPatch | undefined {
+	if (value === undefined) return undefined;
+	return isVolatileSection(value) ? value.get() : (value as CapabilitySettingsPatch);
+}
+
+/**
+ * Live reader for a volatile Config field. A plain 0.1.x section is only a composition
+ * base, so it must not shadow the injected settings service.
+ * @param value - the raw `config.capabilities` field.
+ * @returns a reader, or undefined when the field is not volatile.
+ */
+function capabilityVolatileReader(
+	value: Config["capabilities"],
+): (() => CapabilitySettingsPatch | undefined) | undefined {
+	return isVolatileSection(value) ? () => value.get() : undefined;
+}
+
+// The volatile `capabilities` field makes the parsed Config differ from the declared
+// interface on purpose, so the schema keeps its inferred type instead of `z<Config>`.
+export const Config = z.object({
 	proxy: z.string(),
 	proxyKimi: z.boolean().default(false),
 	retryPolicy: RetryPolicySchema,
-	capabilities: CapabilitySettingsSchema,
+	capabilities: CapabilitySettingsSchema.volatile(),
 	gateway: GatewayConfigSchema,
 	ownerRequest: z.object({
 		loopbackAccessMode: z.union([z.const("loopback"), z.const("ssh-tunnel")]),
@@ -461,7 +502,9 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 	);
 	ctx.effect(() => () => proxyLease.release(), "dsh-coding-subscription-oauth: scoped proxy policy");
 	const logger = ctx.logger(name);
-	const baseCapabilities = resolveCapabilitySettings(config.capabilities);
+	const capabilityBase = readCapabilitySection(config.capabilities);
+	const capabilityVolatile = capabilityVolatileReader(config.capabilities);
+	const baseCapabilities = resolveCapabilitySettings(capabilityBase);
 	const runtime = new CapabilityRuntimeState(baseCapabilities, () => {
 		logger.warn("an optional capability listener failed");
 	});
@@ -488,17 +531,23 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 	const subscriptions = OAUTH_PROVIDER_DEFINITIONS.map(
 		(definition) =>
 			new OAuthProviderSession(definition, () => {
-				if (definition.nativeProviderId === CODEX_PI_PROVIDER) invalidateOptionalAuthState();
+				if (definition.nativeProviderId === CODEX_PI_PROVIDER || definition.nativeProviderId === KIMI_PI_PROVIDER) {
+					invalidateOptionalAuthState();
+				}
 				notifyCatalogChange();
 			}),
 	);
 	const codex = requireSubscription(subscriptions, CODEX_PI_PROVIDER);
+	const kimi = requireSubscription(subscriptions, KIMI_PI_PROVIDER);
 	const opencodeGo = new OpenCodeGoHeaderState();
 	const codexAuth = codexAuthFromSession(codex);
+	const kimiAuth = kimiAuthFromSession(kimi);
 	const usage = createCodexUsageReader({ auth: codexAuth });
+	const kimiUsage = createKimiUsageReader({ auth: kimiAuth });
 	const codexModels = createCodexModelCapabilities({ auth: codexAuth });
 	invalidateOptionalAuthState = () => {
 		usage.clear();
+		kimiUsage.clear();
 		codexModels.clear();
 		runtime.refresh();
 	};
@@ -520,7 +569,8 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 	let settingsOwner = 0;
 	const createFallbackCapabilityController = (): ReturnType<typeof createCapabilitySettingsController> =>
 		createCapabilitySettingsController({
-			...(config.capabilities === undefined ? {} : { base: config.capabilities }),
+			...(capabilityBase === undefined ? {} : { base: capabilityBase }),
+			...(capabilityVolatile === undefined ? {} : { volatileSection: capabilityVolatile }),
 			onListenerError: () => logger.warn("a capability settings listener failed"),
 		});
 	let capabilityController = createFallbackCapabilityController();
@@ -549,7 +599,11 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 		const previousController = capabilityController;
 		const controller = createCapabilitySettingsController({
 			settings: settingsCtx.get("settings") as CapabilitySettingsService,
-			...(config.capabilities === undefined ? {} : { base: config.capabilities }),
+			// DSH 0.2.x addresses settings by profile plugin entry id: this plugin's
+			// composed entry is `name`, the same id the loader assigns in cordis.yml.
+			entryNamespace: name,
+			...(capabilityVolatile === undefined ? {} : { volatileSection: capabilityVolatile }),
+			...(capabilityBase === undefined ? {} : { base: capabilityBase }),
 			onListenerError: () => logger.warn("a capability settings listener failed"),
 		});
 		capabilityController = controller;
@@ -616,10 +670,17 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 		registerOpenCodeGoConnectionRoute(goCtx, goController, ownerRequestPolicy);
 	});
 
+	// The DSH config editor is absent in profiles without a loader-owned patch,
+	// so the search-provider surface reports itself read-only instead of guessing.
+	const searchProviderSettings = createSearchProviderSettings({
+		configEditor: () => ctx.get("configEditor") as SearchProviderConfigEditor | undefined,
+		web: () => ctx.get("web") as SearchProviderRegistry | undefined,
+	});
 	registerCapabilityRoutes(ctx, {
 		controller: capabilityRoutesController,
 		usage: () => usage.read(),
 		credentialInfo: () => describeImagineCredential(ctx.get("credentials") as CredentialProvider | undefined),
+		searchProvider: searchProviderSettings,
 		ownerRequestPolicy,
 	});
 	registerGatewayRoutes(ctx, gateway, ownerRequestPolicy);
@@ -635,11 +696,13 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 				diagnostics: ownerRequestPolicy.diagnostics(),
 			}),
 		() => opencodeGo.snapshot(),
+		() => usage.read(),
+		() => kimiUsage.read(),
 	);
 	registerOAuthImportRoutes(ctx, oauthImportDestinations(grok, subscriptions), {
 		ownerRequestPolicy,
 		onImported: (event) => {
-			if (event.kind === "codex") invalidateOptionalAuthState();
+			if (event.kind === "codex" || event.kind === "kimi") invalidateOptionalAuthState();
 			notifyCatalogChange();
 		},
 	});
@@ -650,9 +713,13 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 		// first visible Codex model after plugin startup.
 		model: () => codex.visibleModels()[0]?.id ?? "",
 	});
+	// Kimi's /coding/v1/search takes only `text_query` (no model), so this
+	// provider carries no model selector, unlike the Codex one above.
+	const kimiSearch = createKimiSearchProvider({ auth: kimiAuth });
 	ctx.inject(["web"], (webCtx) => {
 		const web = webCtx.get("web") as CapabilitySearchRegistry;
 		webCtx.effect(() => bindCapabilitySearch(runtime, web, search), "dsh-coding-subscription-oauth: Codex search");
+		webCtx.effect(() => bindCapabilitySearch(runtime, web, kimiSearch), "dsh-coding-subscription-oauth: Kimi search");
 	});
 
 	ctx.inject(["tools", "attachments", "credentials", "webServer"], async (toolCtx) => {

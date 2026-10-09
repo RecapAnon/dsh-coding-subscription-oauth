@@ -15,6 +15,11 @@ import type { GrokBuildSettingsInjected } from "./GrokBuildSettings.tsx";
 import { GrokBuildSettings } from "./GrokBuildSettings.tsx";
 import type { GrokBuildSettingsKey } from "./locales.ts";
 import { en, zh } from "./locales.ts";
+import {
+	createCurrentModelReader,
+	type ModelDirectoriesLike,
+	SubscriptionUsageBadge,
+} from "./SubscriptionUsageBadge.tsx";
 import type { CodingOAuthStatus, SettingsTabId } from "./types.ts";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
@@ -42,7 +47,7 @@ function IndependentSettingsEntry({
 	useEffect(() => {
 		const openTarget = (event: Event) => {
 			const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
-			if (!tab || !["accounts", "providers", "capabilities", "gateway"].includes(tab)) return;
+			if (!tab || !["accounts", "providers", "capabilities", "gateway", "search"].includes(tab)) return;
 			if (document.querySelector("[data-dsh-coding-oauth=management]")) return;
 			previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			setTargetTab(tab === "providers" ? "accounts" : (tab as SettingsTabId));
@@ -118,8 +123,20 @@ function IndependentSettingsEntry({
 					right: 16,
 					bottom: 16,
 					zIndex: 30,
-					padding: "10px 14px",
-					display: hideTrigger ? "none" : undefined,
+					height: 38,
+					minHeight: 38,
+					padding: "0 14px",
+					borderRadius: "var(--dsw-radius-md, 12px)",
+					border: "none",
+					background: "var(--dsw-alias-button-primary-fill)",
+					color: "var(--dsw-alias-label-primary-foreground)",
+					boxShadow: "0 2px 8px rgba(0, 0, 0, 0.16)",
+					fontSize: 13,
+					fontWeight: 500,
+					cursor: "pointer",
+					display: hideTrigger ? "none" : "inline-flex",
+					alignItems: "center",
+					justifyContent: "center",
 				}}
 				onClick={() => setOpen(true)}
 			>
@@ -127,26 +144,69 @@ function IndependentSettingsEntry({
 			</button>
 			{open ? (
 				<div
-					ref={dialog}
-					role="dialog"
-					aria-modal="true"
-					aria-labelledby="coding-oauth-independent-title"
-					tabIndex={-1}
 					style={{
 						position: "fixed",
 						inset: 0,
 						zIndex: 31,
-						overflow: "auto",
+						background: "rgba(0, 0, 0, 0.45)",
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
 						padding: 20,
-						background: "var(--dsw-alias-bg-layer-1)",
+						overflow: "auto",
 					}}
 				>
-					<div style={{ width: "min(780px, 100%)", margin: "0 auto" }}>
-						<div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-							<h2 id="coding-oauth-independent-title" style={{ margin: 0 }}>
+					<div
+						ref={dialog}
+						role="dialog"
+						aria-modal="true"
+						aria-labelledby="coding-oauth-independent-title"
+						tabIndex={-1}
+						style={{
+							width: "min(780px, 100%)",
+							maxHeight: "90vh",
+							overflow: "auto",
+							padding: "24px 28px",
+							borderRadius: "var(--dsw-radius-panel, 28px)",
+							border: "0.5px solid var(--dsw-alias-border-l4)",
+							background: "var(--dsw-alias-bg-layer-1)",
+							boxShadow: "0 16px 40px rgba(0, 0, 0, 0.25)",
+						}}
+					>
+						<div
+							style={{
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "space-between",
+								gap: 12,
+								marginBottom: 16,
+							}}
+						>
+							<h2
+								id="coding-oauth-independent-title"
+								style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "var(--dsw-alias-label-primary)" }}
+							>
 								{t("title")}
 							</h2>
-							<button ref={closeButton} type="button" onClick={() => setOpen(false)} aria-label={t("cancel")}>
+							<button
+								ref={closeButton}
+								type="button"
+								onClick={() => setOpen(false)}
+								aria-label={t("cancel")}
+								style={{
+									width: 32,
+									height: 32,
+									display: "inline-flex",
+									alignItems: "center",
+									justifyContent: "center",
+									borderRadius: "var(--dsw-radius-sm, 8px)",
+									border: "none",
+									background: "transparent",
+									color: "var(--dsw-alias-label-secondary)",
+									fontSize: 18,
+									cursor: "pointer",
+								}}
+							>
 								×
 							</button>
 						</div>
@@ -194,6 +254,27 @@ export function apply(ctx: ClientContext): void {
 					},
 					register: (slots) => {
 						const disposeToolviews = registerCodexImageToolviews(slots, t);
+						const models = (): ModelDirectoriesLike | undefined =>
+							ctx.get("modelDirectories") as ModelDirectoriesLike | undefined;
+						const disposeUsageBadge = slots.inject("conversation.composer.dock", () => {
+							try {
+								return slots.register(
+									{
+										name: "conversation.composer.dock",
+										id: "coding-subscription-usage",
+										order: 10,
+										locale: namespace,
+										inject: (sessionId: string) => ({
+											currentModel: createCurrentModelReader(models, sessionId),
+											t,
+										}),
+									},
+									SubscriptionUsageBadge,
+								);
+							} catch {
+								return undefined;
+							}
+						});
 						const disposeSettings = slots.inject("settings.section", () => {
 							try {
 								const release = slots.register(
@@ -218,6 +299,7 @@ export function apply(ctx: ClientContext): void {
 						});
 						return () => {
 							disposeToolviews();
+							disposeUsageBadge();
 							disposeSettings();
 						};
 					},

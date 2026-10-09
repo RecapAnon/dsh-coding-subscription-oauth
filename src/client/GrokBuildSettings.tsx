@@ -8,6 +8,7 @@ import { AboutTab } from "./components/AboutTab.tsx";
 import { AccountsTab } from "./components/AccountsTab.tsx";
 import { CapabilitiesTab } from "./components/CapabilitiesTab.tsx";
 import { GatewayTab } from "./components/GatewayTab.tsx";
+import { SearchTab } from "./components/SearchTab.tsx";
 import type { SettingsTabHint } from "./components/SettingsTabs.tsx";
 import { SettingsTabs } from "./components/SettingsTabs.tsx";
 import {
@@ -19,6 +20,7 @@ import {
 	GATEWAY_REVEAL_PATH,
 	GATEWAY_ROTATE_PATH,
 	IMAGINE_CREDENTIAL_PATH,
+	KIMI_USAGE_PATH,
 	LOGIN_CANCEL_PATH,
 	LOGIN_CODE_PATH,
 	LOGIN_PATH,
@@ -41,11 +43,12 @@ import {
 	parseGateway,
 	parseGatewayPort,
 	parseImagineCredential,
+	parseKimiUsageView,
 	parsePreview,
 	parseSources,
 	parseUsage,
 } from "./parsers.ts";
-import { bodyStyle, buttonStyle, errorStyle, pageStyle, panelStyle, titleStyle } from "./styles.ts";
+import { bodyStyle, compactButtonStyle, errorStyle, pageStyle, panelStyle, titleStyle } from "./styles.ts";
 import type {
 	CapabilitySettingKey,
 	CapabilitySettingsView,
@@ -105,6 +108,9 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 	const [usage, setUsage] = useState<UsageView | undefined>(undefined);
 	const [usageError, setUsageError] = useState<string | undefined>(undefined);
 	const [usageLoading, setUsageLoading] = useState(false);
+	const [kimiUsage, setKimiUsage] = useState<UsageView | undefined>(undefined);
+	const [kimiUsageError, setKimiUsageError] = useState<string | undefined>(undefined);
+	const [kimiUsageLoading, setKimiUsageLoading] = useState(false);
 	const [imagine, setImagine] = useState<ImagineCredentialView | undefined>(undefined);
 	const [imagineError, setImagineError] = useState<string | undefined>(undefined);
 	const [gateway, setGateway] = useState<GatewayView | undefined>(undefined);
@@ -194,6 +200,19 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 		}
 	}, [t]);
 
+	const refreshKimiUsage = useCallback(async () => {
+		setKimiUsageLoading(true);
+		try {
+			setKimiUsage(parseKimiUsageView(await jsonRequest<unknown>(KIMI_USAGE_PATH)));
+			setKimiUsageError(undefined);
+		} catch (error: unknown) {
+			setKimiUsage(undefined);
+			setKimiUsageError(error instanceof Error ? error.message : t("usageUnavailable"));
+		} finally {
+			setKimiUsageLoading(false);
+		}
+	}, [t]);
+
 	// Accounts: status immediately; sources shortly after (non-blocking for first paint).
 	useEffect(() => {
 		ensureMicroStyles();
@@ -266,6 +285,17 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 		setUsageError(undefined);
 		setUsageLoading(false);
 	}, [capabilities?.value.codexUsage, refreshUsage, status?.providers.codex.status]);
+
+	useEffect(() => {
+		const signedIn = status?.providers.kimi.status === "signed-in";
+		if (signedIn) {
+			void refreshKimiUsage();
+			return;
+		}
+		setKimiUsage(undefined);
+		setKimiUsageError(undefined);
+		setKimiUsageLoading(false);
+	}, [refreshKimiUsage, status?.providers.kimi.status]);
 
 	useEffect(() => {
 		if (gateway !== undefined) setPortDraft(String(gateway.port));
@@ -638,9 +668,9 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 		}
 	};
 
-	const openAccountsForCodex = (): void => {
+	const openAccountsFor = (provider: "codex" | "kimi"): void => {
 		setActiveTab("accounts");
-		window.setTimeout(() => document.getElementById("coding-oauth-login-codex")?.focus(), 0);
+		window.setTimeout(() => document.getElementById(`coding-oauth-login-${provider}`)?.focus(), 0);
 	};
 
 	const focusCapabilityDependency = (target: "codexImages" | "imagineCredential"): void => {
@@ -648,7 +678,7 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 		document.getElementById(id)?.focus();
 	};
 
-	const renderCapabilities = (scope?: "codex" | "grok") => (
+	const renderCapabilities = (scope?: "codex" | "kimi" | "grok") => (
 		<CapabilitiesTab
 			scope={scope}
 			t={t}
@@ -658,11 +688,12 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 			imagine={imagine}
 			imagineError={imagineError}
 			codexSignedIn={status?.providers.codex.status === "signed-in"}
+			kimiSignedIn={status?.providers.kimi.status === "signed-in"}
 			onRetry={() => {
 				void refreshCapabilities();
 				void refreshImagine();
 			}}
-			onOpenAccounts={openAccountsForCodex}
+			onOpenAccounts={openAccountsFor}
 			onFocusDependency={focusCapabilityDependency}
 			onPatchCapability={(key, value) => patchCapability(key, value)}
 		/>
@@ -685,7 +716,7 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 				<div role="alert" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
 					<p style={errorStyle}>{requestError ?? statusError}</p>
 					{status === undefined ? (
-						<button type="button" style={buttonStyle} onClick={() => void refresh()}>
+						<button type="button" style={compactButtonStyle} onClick={() => void refresh()}>
 							{t("retry")}
 						</button>
 					) : null}
@@ -732,6 +763,9 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 						usage={usage}
 						usageError={usageError}
 						usageLoading={usageLoading}
+						kimiUsage={kimiUsage}
+						kimiUsageError={kimiUsageError}
+						kimiUsageLoading={kimiUsageLoading}
 						onSignIn={(slug, method, targetAccountId) => signIn(slug, method, targetAccountId)}
 						onSignOut={(slug) => {
 							void signOut(slug);
@@ -823,6 +857,7 @@ export function GrokBuildSettings({ t, close, initialTab }: GrokBuildSettingsPro
 						}}
 					/>
 				) : null}
+				{activeTab === "search" ? <SearchTab t={t} /> : null}
 				{activeTab === "about" ? <AboutTab t={t} /> : null}
 			</div>
 		</section>

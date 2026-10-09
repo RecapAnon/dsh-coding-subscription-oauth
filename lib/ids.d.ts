@@ -5,4 +5,8 @@ export { ANTIGRAVITY_ROUTE, CAPABILITY_SETTINGS_NAMESPACE, CAPABILITY_SETTINGS_P
 export declare const CODING_OAUTH_API_BASE: "/plugins/dsh-grok-build";
 export declare const CODING_OAUTH_ACCOUNTS_SET_ACTIVE_PATH: "/plugins/dsh-grok-build/oauth/accounts/set-active";
 export declare const CODING_OAUTH_ACCOUNTS_REMOVE_PATH: "/plugins/dsh-grok-build/oauth/accounts/remove";
+export declare const CODING_OAUTH_SUBSCRIPTION_USAGE_PATH: "/plugins/dsh-grok-build/oauth/usage";
+export declare const KIMI_USAGE_PATH: "/plugins/dsh-grok-build/kimi/usage";
+/** Effective DSH web search provider pin, read and written through the profile config editor. */
+export declare const SEARCH_PROVIDER_PATH: "/plugins/dsh-grok-build/web/search-provider";
 //# sourceMappingURL=ids.d.ts.map

@@ -368,22 +368,16 @@ describe("createCodingOAuthAdapter model discovery", () => {
 		// now carries the exact encoded byte count the route budgets against.
 		const attachmentTargets: Array<{ width: number; height: number; maxBytes: number }> = [];
 		const attachments = {
-			readImageRequest: async (
-				ref: { attachmentId: string },
-				target: { width: number; height: number; maxBytes: number },
-			) => {
-				attachmentTargets.push(target);
+			readImageRequest: async (_ref: unknown, policy: { maxPixels?: number; maxBytes?: number }) => {
+				attachmentPolicies.push(policy);
+				// dsh-llm-pi-ai 0.2.0-rc.2 accounts every retained image occurrence against
+				// profile.maxRequestImageBytes through the request version's exact `bytes`;
+				// a missing value makes the budget check demand an offload.
 				return {
-					variantId: `${ref.attachmentId}-request`,
-					attachment: ref,
+					type: "image",
 					data: new Uint8Array([137, 80, 78, 71]),
 					mediaType: "image/png",
 					bytes: 4,
-					width: target.width,
-					height: target.height,
-					depth: "uchar",
-					space: "srgb",
-					hasAlpha: false,
 				};
 			},
 		};
@@ -459,9 +453,8 @@ describe("createCodingOAuthAdapter model discovery", () => {
 									attachmentId: AttachmentId("attachment-policy"),
 									mediaType: "image/png",
 									bytes: 4,
-									// Deliberately above the route pixel budget so the projected
-									// target proves the budget was applied; a 1x1 source would be
-									// passed through unchanged and assert nothing.
+									// Larger than the profile's 2048x2048 pixel budget, so the
+									// projected request target below proves the budget was applied.
 									width: 4096,
 									height: 4096,
 								},
@@ -487,9 +480,9 @@ describe("createCodingOAuthAdapter model discovery", () => {
 		await expect(fast?.options?.onPayload?.({ model: eligibleId }, { id: eligibleId })).resolves.toMatchObject({
 			service_tier: "priority",
 		});
-		// 4096x4096 projected under requestImagePixelBudget (2048*2048) is 2048x2048,
-		// so both budgets in REQUEST_IMAGE_POLICY are proven to reach the store.
-		expect(attachmentTargets).toEqual([
+		// dsh-llm-pi-ai 0.2.0-rc.2 hands the attachment store a projected target
+		// (dimensions + byte cap) instead of the raw `maxPixels` budget.
+		expect(attachmentPolicies).toEqual([
 			{ width: 2048, height: 2048, maxBytes: 1024 * 1024 },
 			{ width: 2048, height: 2048, maxBytes: 1024 * 1024 },
 		]);

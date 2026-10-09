@@ -123,9 +123,7 @@ POST   /plugins/dsh-grok-build/gateway/rotate
 
 ## 6. 兼容性
 
-正式包名与仓库名是 **`dsh-coding-subscription-oauth`**。旧 GitHub 地址仍指向同一条 `main`，因此旧的 `dsh plugin add github:lninghaha/dsh-grok-build` 仍会安装更名后的包。第一次公开 npm / GitHub Release 是 **`0.4.1`**。当前版本是 **`0.8.5`**（`dsh plugin --profile web add dsh-coding-subscription-oauth@0.8.5`），在 DSH **`0.1.7-rc.2`** 上验证，并接受整条 **`^0.1.1-rc.2`** 线。`0.2.0-rc.1` 仅作为未验证 BOM 候选记录。GitHub 与本地 tarball 安装仍然有效。
-
-DSH 在 profile 启动时校验 `peerDependencies`：`@deepseek-ai/dsh-app-boot` 中的 `evaluatePluginCompatibility` 用 `semver.satisfies(runtimeVersion, range, { includePrerelease: true })` 对每个 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` peer 与**运行时版本**比较，且忽略 `peerDependenciesMeta.optional`。因此精确 peer pin 等于声明「只允许这一个 DSH 版本」，之后每次 DSH 发布都会拒绝本插件，直到有人手工授予精确版本豁免。这里刻意做了拆分：`compatibility/dsh-bom.json` 与 `devDependencies` 精确锁定本次构建与测试所用版本，而 `peerDependencies` 使用共享的 `supportedDshRange` 描述允许运行的宿主范围。`build/verify-dsh-bom.mjs` 同时校验这两半，`tests/compatibility.spec.ts` 中的回归测试会拒绝重新引入的精确 pin。
+正式包名与仓库名是 **`dsh-coding-subscription-oauth`**。旧 GitHub 地址仍指向同一条 `main`，因此旧的 `dsh plugin add github:lninghaha/dsh-grok-build` 仍会安装更名后的包。第一次公开 npm / GitHub Release 是 **`0.4.1`**。当前版本是 **`0.8.5`**（`dsh plugin --profile web add dsh-coding-subscription-oauth@0.8.5`），精确验证 DSH **`0.2.0-rc.2`**。`0.1.5-rc.1` 仅作为未验证 BOM 候选记录；客户端 inject 不再要求 `@deepseek-ai/dsh-client-runtime`（该候选宿主上不存在此包）。GitHub 与本地 tarball 安装仍然有效。
 
 以下标识保持稳定（无迁移方案前不要改名）：
 

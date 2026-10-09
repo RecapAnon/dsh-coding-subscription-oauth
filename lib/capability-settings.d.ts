@@ -11,17 +11,19 @@ import { CAPABILITY_SETTINGS_NAMESPACE } from "./ids.js";
 /** Settings namespace owned by this plugin. */
 export { CAPABILITY_SETTINGS_NAMESPACE } from "./ids.js";
 /** Default-off capability flags. Presence in the user section marks an override. */
-export declare const CAPABILITY_FLAG_KEYS: readonly ["codexSearch", "codexImages", "codexImageEdits", "codexImagesAnyModel", "codexUsage", "codexFast", "grokImagineImage", "grokImagineVideo"];
+export declare const CAPABILITY_FLAG_KEYS: readonly ["codexSearch", "kimiSearch", "codexImages", "codexImageEdits", "codexImagesAnyModel", "codexUsage", "codexFast", "grokImagineImage", "grokImagineVideo"];
 /** Conservative numeric limits persisted beside the flags. */
 export declare const CAPABILITY_LIMIT_KEYS: readonly ["searchResults", "imageCount", "videoArtifactTtlMs"];
 /** Every key the controller admits into secret-free state. */
-export declare const CAPABILITY_SETTINGS_KEYS: readonly ["codexSearch", "codexImages", "codexImageEdits", "codexImagesAnyModel", "codexUsage", "codexFast", "grokImagineImage", "grokImagineVideo", "searchResults", "imageCount", "videoArtifactTtlMs"];
+export declare const CAPABILITY_SETTINGS_KEYS: readonly ["codexSearch", "kimiSearch", "codexImages", "codexImageEdits", "codexImagesAnyModel", "codexUsage", "codexFast", "grokImagineImage", "grokImagineVideo", "searchResults", "imageCount", "videoArtifactTtlMs"];
 export type CapabilityFlagKey = (typeof CAPABILITY_FLAG_KEYS)[number];
 export type CapabilityLimitKey = (typeof CAPABILITY_LIMIT_KEYS)[number];
 export type CapabilitySettingsKey = (typeof CAPABILITY_SETTINGS_KEYS)[number];
 /** Resolved, secret-free capability section. */
 export interface CapabilitySettings {
     readonly codexSearch: boolean;
+    /** Kimi Code subscription search (`/coding/v1/search`). */
+    readonly kimiSearch: boolean;
     readonly codexImages: boolean;
     readonly codexImageEdits: boolean;
     /** Allow non-Codex-route models to use the Codex image generate/edit tools. */
@@ -62,6 +64,7 @@ export declare const DEFAULT_CAPABILITY_SETTINGS: CapabilitySettings;
  */
 export declare const CapabilitySettingsSchema: Schema<Schemastery.ObjectS<NoInfer<{
     codexSearch: Schema<boolean, boolean, "defined">;
+    kimiSearch: Schema<boolean, boolean, "defined">;
     codexImages: Schema<boolean, boolean, "defined">;
     codexImageEdits: Schema<boolean, boolean, "defined">;
     codexImagesAnyModel: Schema<boolean, boolean, "defined">;
@@ -74,6 +77,7 @@ export declare const CapabilitySettingsSchema: Schema<Schemastery.ObjectS<NoInfe
     videoArtifactTtlMs: Schema<number, number, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     codexSearch: Schema<boolean, boolean, "defined">;
+    kimiSearch: Schema<boolean, boolean, "defined">;
     codexImages: Schema<boolean, boolean, "defined">;
     codexImageEdits: Schema<boolean, boolean, "defined">;
     codexImagesAnyModel: Schema<boolean, boolean, "defined">;
@@ -88,6 +92,7 @@ export declare const CapabilitySettingsSchema: Schema<Schemastery.ObjectS<NoInfe
 /** Serialized schema metadata consumed by Settings UI tests and diagnostics. */
 export declare const CAPABILITY_SETTINGS_SCHEMA_JSON: Schema<Schemastery.ObjectS<NoInfer<{
     codexSearch: Schema<boolean, boolean, "defined">;
+    kimiSearch: Schema<boolean, boolean, "defined">;
     codexImages: Schema<boolean, boolean, "defined">;
     codexImageEdits: Schema<boolean, boolean, "defined">;
     codexImagesAnyModel: Schema<boolean, boolean, "defined">;
@@ -100,6 +105,7 @@ export declare const CAPABILITY_SETTINGS_SCHEMA_JSON: Schema<Schemastery.ObjectS
     videoArtifactTtlMs: Schema<number, number, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     codexSearch: Schema<boolean, boolean, "defined">;
+    kimiSearch: Schema<boolean, boolean, "defined">;
     codexImages: Schema<boolean, boolean, "defined">;
     codexImageEdits: Schema<boolean, boolean, "defined">;
     codexImagesAnyModel: Schema<boolean, boolean, "defined">;
@@ -155,16 +161,42 @@ export interface CapabilitySettingsService {
     get?(ns: string): unknown;
     update?(ns: string, patch: object, expectedRevision?: number): Promise<void>;
     replace?(ns: string, section: object, expectedRevision?: number): Promise<void>;
+    mutate?(ns: string, ops: readonly CapabilitySettingsPathOp[], expectedRevision?: number): Promise<void>;
     register?(ns: string, schema: CapabilitySettingsSchemaType, options?: {
         readonly base?: CapabilitySettingsPatch;
         readonly applies?: "live" | "restart";
         readonly validate?: (value: CapabilitySettings) => void;
     }): CapabilitySettingsScope;
 }
+/** One path-addressed entry-config edit, mirroring the Host's `settings.mutate()` wire form. */
+export interface CapabilitySettingsPathOp {
+    readonly op: "set" | "unset";
+    readonly path: readonly string[];
+    readonly value?: unknown;
+}
+/**
+ * A 0.2.x `.volatile()` Config field: the loader hands the plugin a live reference
+ * whose `get()` returns the value committed by the running fiber, instead of the
+ * parsed object 0.1.x passed through.
+ */
+export interface CapabilityVolatileSection<T> {
+    get(): T | undefined;
+}
 /** Construction options. `base` is the YAML / composition entry layered under the user section. */
 export interface CapabilitySettingsControllerOptions {
     readonly settings?: CapabilitySettingsService | undefined;
     readonly base?: CapabilitySettingsPatch | undefined;
+    /**
+     * Live reader for a volatile Config section. Preferred over `describe()` because it
+     * is the value the Host actually committed into this plugin's fiber.
+     */
+    readonly volatileSection?: (() => unknown) | undefined;
+    /**
+     * Profile plugin entry id owning this plugin's Config under the 0.2.x form model
+     * (the composed entry id, normally the plugin's exported `name`). Used when
+     * `describe()` does not show which entry carries the capability section.
+     */
+    readonly entryNamespace?: string | undefined;
     /** Contain both synchronous and asynchronous observer failures. */
     readonly onListenerError?: ((error: unknown) => void) | undefined;
 }
@@ -223,9 +255,12 @@ export declare class CapabilitySettingsController {
     private readonly settings;
     private readonly base;
     private readonly onListenerError;
+    private readonly configuredEntryNamespace;
+    private readonly volatileSection;
     private readonly listeners;
     private scope;
     private scopeDisposer;
+    private resolvedNamespace;
     private localRevision;
     private lastSnapshot;
     private disposed;
@@ -257,11 +292,35 @@ export declare class CapabilitySettingsController {
     /** Drop the register() watcher and every listener. Further writes fail. */
     dispose(): void;
     private attachScope;
+    /**
+     * Whether the attached service is the 0.2.x form model: one descriptor per profile
+     * plugin entry, no dynamic `register()`. There the capability section is this
+     * plugin entry's `capabilities` Config field, so reads unwrap it and writes address
+     * the entry (and are applied with path ops to keep sibling fields intact).
+     */
+    private get entryScoped();
+    /**
+     * Namespace the attached service addresses. 0.1.x registered this plugin's own
+     * namespace; 0.2.x only accepts profile plugin entries, so resolve the entry that
+     * owns this plugin's Config once and reuse it.
+     * @returns the legacy namespace, or the owning entry id under the form model.
+     */
+    hostNamespace(): string;
+    private resolveHostNamespace;
+    private describedSection;
     private writeReason;
     private isWritable;
     private write;
     private readSnapshot;
+    private readVolatileSection;
     private readResolvedFromService;
+    private readServiceValue;
+    /**
+     * Apply one edit through the 0.2.x form model. `mutate()` is preferred because a
+     * shallow `update()` of the entry would drop the capability keys a sparse patch
+     * does not restate; `replace` resets the section instead of the whole entry.
+     */
+    private writeEntryScoped;
     private readDescribed;
     private publish;
 }

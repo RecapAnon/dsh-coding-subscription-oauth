@@ -46,7 +46,10 @@ export const SOURCES_COMMIT_PATH = OAUTH_IMPORT_COMMIT_PATH;
 export const SOURCES_CANCEL_PATH = OAUTH_IMPORT_CANCEL_PATH;
 export const CAPABILITIES_PATH = CAPABILITY_SETTINGS_PATH;
 export const CODEX_USAGE_PATH = CORE_CODEX_USAGE_PATH;
+export const KIMI_USAGE_PATH = "/plugins/dsh-grok-build/kimi/usage";
+export const SUBSCRIPTION_USAGE_PATH = "/plugins/dsh-grok-build/oauth/usage";
 export const IMAGINE_CREDENTIAL_PATH = IMAGINE_CREDENTIAL_STATUS_PATH;
+export const SEARCH_PROVIDER_PATH = "/plugins/dsh-grok-build/web/search-provider";
 export const GATEWAY_PATH = GATEWAY_SETTINGS_PATH;
 export const GATEWAY_REVEAL_PATH = CORE_GATEWAY_REVEAL_PATH;
 export const GATEWAY_ROTATE_PATH = CORE_GATEWAY_ROTATE_PATH;
@@ -118,6 +121,7 @@ export const CAPABILITY_TOGGLES: readonly {
 	requiresImages?: true;
 }[] = [
 	{ key: "codexSearch", label: "capCodexSearch", hint: "capCodexSearchHint" },
+	{ key: "kimiSearch", label: "capKimiSearch", hint: "capKimiSearchHint" },
 	{ key: "codexImages", label: "capCodexImages", hint: "capCodexImagesHint" },
 	{ key: "codexImageEdits", label: "capCodexImageEdits", hint: "capCodexImageEditsHint", requiresImages: true },
 	{
@@ -211,6 +215,7 @@ export const PROVIDERS: readonly ProviderCardDefinition[] = [
 export const SETTINGS_TABS: readonly { id: SettingsTabId; label: GrokBuildSettingsKey }[] = [
 	{ id: "accounts", label: "tabAccounts" },
 	{ id: "gateway", label: "tabGateway" },
+	{ id: "search", label: "tabSearch" },
 	{ id: "capabilities", label: "tabCapabilities" },
 	{ id: "about", label: "tabAbout" },
 ];
