@@ -1,18 +1,27 @@
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createSessionGatewayBackend } from "../src/gateway-backend.ts";
 import { CODEX_OAUTH_PROVIDER } from "../src/oauth-providers.ts";
 import type { OAuthProviderSession } from "../src/oauth-session.ts";
 import { GROK_BUILD_BASE_URL, grokBuildBaselineModels, grokBuildFingerprintHeaders } from "../src/provider.ts";
 import { GrokBuildSession } from "../src/session.ts";
 
-// All auth stays in memory. Global fetch is replaced before any lazy OAuth/API
-// module is loaded; no real store, home, account, refresh, or network is used.
+// All auth stays in memory. Global fetch is replaced before any request is made;
+// no real store, home, account, refresh, or network is used.
 afterEach(() => {
 	vi.unstubAllGlobals();
 });
+
+// Warm the modules the first Grok stream loads lazily (the Responses API module with
+// the OpenAI SDK, and the xAI OAuth flow) so a cold import on a loaded Windows suite
+// run is charged to this hook instead of the first test's timeout. Importing them does
+// no I/O: the OpenAI client reads the global fetch only when a request constructs it.
+beforeAll(async () => {
+	await import("@earendil-works/pi-ai/api/openai-responses");
+	await xaiProvider().auth.oauth?.toAuth({ type: "oauth", access: "fixture-warmup", refresh: "", expires: 0 });
+}, 60_000);
 
 function fixtureGrok(selectedIds?: readonly string[]) {
 	let credential: Credential | undefined = {
