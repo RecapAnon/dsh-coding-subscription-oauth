@@ -368,8 +368,8 @@ describe("createCodingOAuthAdapter model discovery", () => {
 		// now carries the exact encoded byte count the route budgets against.
 		const attachmentTargets: Array<{ width: number; height: number; maxBytes: number }> = [];
 		const attachments = {
-			readImageRequest: async (_ref: unknown, policy: { maxPixels?: number; maxBytes?: number }) => {
-				attachmentPolicies.push(policy);
+			readImageRequest: async (_ref: unknown, target: { width: number; height: number; maxBytes: number }) => {
+				attachmentTargets.push(target);
 				// dsh-llm-pi-ai 0.2.0-rc.2 accounts every retained image occurrence against
 				// profile.maxRequestImageBytes through the request version's exact `bytes`;
 				// a missing value makes the budget check demand an offload.
@@ -482,7 +482,7 @@ describe("createCodingOAuthAdapter model discovery", () => {
 		});
 		// dsh-llm-pi-ai 0.2.0-rc.2 hands the attachment store a projected target
 		// (dimensions + byte cap) instead of the raw `maxPixels` budget.
-		expect(attachmentPolicies).toEqual([
+		expect(attachmentTargets).toEqual([
 			{ width: 2048, height: 2048, maxBytes: 1024 * 1024 },
 			{ width: 2048, height: 2048, maxBytes: 1024 * 1024 },
 		]);

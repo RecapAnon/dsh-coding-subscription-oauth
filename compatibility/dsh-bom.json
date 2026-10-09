@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "coreAbi": "dsh-coding-oauth-core/v1",
-  "supportedDshRange": "^0.1.1-rc.2",
+  "supportedDshRange": "^0.2.0-rc.2",
   "verified": {
     "id": "dsh-0.2.0-rc.2",
     "dshVersion": "0.2.0-rc.2",
