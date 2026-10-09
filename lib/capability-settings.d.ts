@@ -196,10 +196,16 @@ export interface CapabilitySettingsDocumentEvents {
  * Profile entry id owning a plugin context. Injected child contexts inherit the
  * loader entry of an ancestor, so follow `fiber.parent.fiber` until one carries
  * `fiber.entry.options.id`. Only non-empty strings are accepted; cycles stop the walk.
+ *
+ * The loader also hands a parent's entry to fibers started by `ctx.plugin()`, so when
+ * another plugin loads this one the nearest entry belongs to that plugin. Pass
+ * `specifiers` to require the entry's module specifier (`options.name`) to be one of
+ * them, or a subpath of one (`pkg/lib/index.js`); any other entry yields undefined.
  * @param context - the plugin (or injected child) context.
- * @returns the owning entry id, or undefined when no loader entry is visible.
+ * @param specifiers - module specifiers that identify this plugin's own entry.
+ * @returns the owning entry id, or undefined when no owned loader entry is visible.
  */
-export declare function capabilityEntryNamespace(context: unknown): string | undefined;
+export declare function capabilityEntryNamespace(context: unknown, specifiers?: readonly string[] | undefined): string | undefined;
 /** Construction options. `base` is the YAML / composition entry layered under the user section. */
 export interface CapabilitySettingsControllerOptions {
     readonly settings?: CapabilitySettingsService | undefined;

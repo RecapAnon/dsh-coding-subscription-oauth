@@ -205,24 +205,42 @@ export interface CapabilitySettingsDocumentEvents {
  * Profile entry id owning a plugin context. Injected child contexts inherit the
  * loader entry of an ancestor, so follow `fiber.parent.fiber` until one carries
  * `fiber.entry.options.id`. Only non-empty strings are accepted; cycles stop the walk.
+ *
+ * The loader also hands a parent's entry to fibers started by `ctx.plugin()`, so when
+ * another plugin loads this one the nearest entry belongs to that plugin. Pass
+ * `specifiers` to require the entry's module specifier (`options.name`) to be one of
+ * them, or a subpath of one (`pkg/lib/index.js`); any other entry yields undefined.
  * @param context - the plugin (or injected child) context.
- * @returns the owning entry id, or undefined when no loader entry is visible.
+ * @param specifiers - module specifiers that identify this plugin's own entry.
+ * @returns the owning entry id, or undefined when no owned loader entry is visible.
  */
-export function capabilityEntryNamespace(context: unknown): string | undefined {
+export function capabilityEntryNamespace(
+	context: unknown,
+	specifiers?: readonly string[] | undefined,
+): string | undefined {
 	try {
 		let fiber: unknown = asRecord(context)?.["fiber"];
 		const seen = new Set<unknown>();
 		while (fiber !== undefined && fiber !== null && !seen.has(fiber)) {
 			seen.add(fiber);
 			const current = asRecord(fiber);
-			const id = asRecord(asRecord(current?.["entry"])?.["options"])?.["id"];
-			if (typeof id === "string" && id.length > 0) return id;
+			const options = asRecord(asRecord(current?.["entry"])?.["options"]);
+			const id = options?.["id"];
+			if (typeof id === "string" && id.length > 0) {
+				return specifiers === undefined || ownsSpecifier(options?.["name"], specifiers) ? id : undefined;
+			}
 			fiber = asRecord(current?.["parent"])?.["fiber"];
 		}
 	} catch {
 		// A hostile or partially torn-down context must not break startup.
 	}
 	return undefined;
+}
+
+/** Whether a loader module specifier names one of `specifiers` or a subpath of it. */
+function ownsSpecifier(value: unknown, specifiers: readonly string[]): boolean {
+	if (typeof value !== "string" || value.length === 0) return false;
+	return specifiers.some((specifier) => value === specifier || value.startsWith(`${specifier}/`));
 }
 
 /** Construction options. `base` is the YAML / composition entry layered under the user section. */

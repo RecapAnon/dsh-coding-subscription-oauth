@@ -254,6 +254,12 @@ export {
 /** Stable Cordis plugin name. */
 export const name = "llm-grok-build-oauth";
 
+/**
+ * Module specifier the bundle's `cordis.patch.yml` gives this plugin's loader entry.
+ * A loader entry with another specifier belongs to whichever plugin loaded this one.
+ */
+const PLUGIN_SPECIFIERS = ["dsh-coding-subscription-oauth"] as const;
+
 /** Separate API-key credential used only by official xAI Imagine REST calls. */
 export const XAI_API_KEY_CREDENTIAL = "XAI_API_KEY";
 /** Validate locally because `credentialRef()` is a value export of the optional credentials peer. */
@@ -507,8 +513,9 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 	const capabilityBase = readCapabilitySection(config.capabilities);
 	const capabilityVolatile = capabilityVolatileReader(config.capabilities);
 	// DSH 0.2.x addresses settings by profile plugin entry id. Prefer the id the loader
-	// actually assigned to this plugin's entry; the composed default id is `name`.
-	const capabilityEntry = capabilityEntryNamespace(ctx) ?? name;
+	// actually assigned to this plugin's entry; the composed default id is `name`. An
+	// entry inherited from another plugin that loaded this one is not ours to address.
+	const capabilityEntry = capabilityEntryNamespace(ctx, PLUGIN_SPECIFIERS) ?? name;
 	const baseCapabilities = resolveCapabilitySettings(capabilityBase);
 	const runtime = new CapabilityRuntimeState(baseCapabilities, () => {
 		logger.warn("an optional capability listener failed");

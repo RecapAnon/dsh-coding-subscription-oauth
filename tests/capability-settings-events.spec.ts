@@ -235,6 +235,18 @@ describe("capabilityEntryNamespace", () => {
 		expect(capabilityEntryNamespace(child)).toBe(ENTRY);
 	});
 
+	it("trusts only an entry whose module specifier names this plugin when specifiers are given", () => {
+		const specifiers = ["dsh-coding-subscription-oauth"];
+		const entry = (name: unknown) => ({ fiber: { parent: { fiber: { entry: { options: { id: ENTRY, name } } } } } });
+		expect(capabilityEntryNamespace(entry("dsh-coding-subscription-oauth"), specifiers)).toBe(ENTRY);
+		expect(capabilityEntryNamespace(entry("dsh-coding-subscription-oauth/lib/index.js"), specifiers)).toBe(ENTRY);
+		// ctx.plugin() from another plugin inherits that plugin's entry: do not adopt its id.
+		expect(capabilityEntryNamespace(entry("another-dsh-plugin"), specifiers)).toBeUndefined();
+		expect(capabilityEntryNamespace(entry("dsh-coding-subscription-oauth-fork"), specifiers)).toBeUndefined();
+		expect(capabilityEntryNamespace(entry(undefined), specifiers)).toBeUndefined();
+		expect(capabilityEntryNamespace(entry(7), specifiers)).toBeUndefined();
+	});
+
 	it("accepts only non-empty string ids and stops on cycles", () => {
 		expect(capabilityEntryNamespace(undefined)).toBeUndefined();
 		expect(capabilityEntryNamespace({})).toBeUndefined();

@@ -337,7 +337,9 @@ describe("plugin startup catalog initialization", () => {
 			effect: vi.fn((setup: () => unknown) => setup()),
 		} as unknown as Context;
 		// The loader entry sits on an ancestor fiber; the owned runtime is an injected child.
-		const root = { fiber: { entry: { id: "nested/path", options: { id: entryNamespace } } } };
+		const root = {
+			fiber: { entry: { id: "nested/path", options: { id: entryNamespace, name: "dsh-coding-subscription-oauth" } } },
+		};
 		const context = {
 			fiber: { parent: root },
 			webServer: webServerCtx.webServer,
@@ -473,6 +475,87 @@ describe("plugin startup catalog initialization", () => {
 		second.release();
 		expect(second.count()).toBe(0);
 		expect(searchReleases[1]).toHaveBeenCalledOnce();
+	});
+
+	it("falls back to the plugin name when the inherited loader entry belongs to another plugin", async () => {
+		vi.spyOn(GrokBuildSession.prototype, "loadCachedCatalog").mockResolvedValue(undefined);
+		vi.spyOn(OAuthProviderSession.prototype, "loadCachedModels").mockResolvedValue(undefined);
+		vi.spyOn(GrokBuildSession.prototype, "refreshLiveCatalog").mockResolvedValue(undefined);
+		const foreignEntry = "host-plugin-entry";
+		const registerSearchProvider = vi.fn(() => vi.fn());
+		const webCtx = {
+			get: vi.fn((service: string) => (service === "web" ? { registerSearchProvider } : undefined)),
+			effect: vi.fn((setup: () => unknown) => setup()),
+		} as unknown as Context;
+		let settingsInjection: ((ctx: Context) => void) | undefined;
+		// Another plugin's ctx.plugin() started this one, so the nearest entry is that plugin's.
+		const root = { fiber: { entry: { options: { id: foreignEntry, name: "another-dsh-plugin" } } } };
+		const context = {
+			fiber: { parent: root },
+			webServer: requiredWebContext().webServer,
+			logger: () => ({ warn: vi.fn() }),
+			emit: vi.fn(),
+			effect: vi.fn((setup: () => unknown) => setup()),
+			llm: { registerAdapter: vi.fn(() => Object.assign(vi.fn(), { replace: vi.fn() })) },
+			get: vi.fn(() => undefined),
+			inject: vi.fn((services: readonly string[], callback: (ctx: Context) => void) => {
+				if (services.length === 1 && services[0] === "settings") {
+					settingsInjection = callback;
+					return runFiber();
+				}
+				if (services.length === 1 && services[0] === "web") return runFiber(() => callback(webCtx));
+				if (services.length === 1 && services[0] === "webServer") {
+					return runFiber(() => callback(requiredWebContext()));
+				}
+				if (services.length === 0 || (services.length === 1 && services[0] === "llm")) {
+					return runFiber(() => callback(context));
+				}
+				return runFiber();
+			}),
+		} as unknown as Context;
+
+		apply(context, { capabilities: { codexSearch: false } });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(settingsInjection).toBeDefined();
+
+		const entries: Record<string, { capabilities: CapabilitySettingsPatch; revision: number }> = {
+			[foreignEntry]: { capabilities: { codexSearch: false }, revision: 0 },
+			"llm-grok-build-oauth": { capabilities: { codexSearch: false }, revision: 0 },
+		};
+		const listeners = new Set<(ns: string, revision: number) => void>();
+		const set = (ns: string, capabilities: CapabilitySettingsPatch): void => {
+			entries[ns]!.capabilities = capabilities;
+			entries[ns]!.revision++;
+			for (const listener of [...listeners]) listener(ns, entries[ns]!.revision);
+		};
+		const service: CapabilitySettingsService = {
+			writable: true,
+			describe: () =>
+				Object.entries(entries).map(([ns, entry]) => ({
+					ns,
+					revision: entry.revision,
+					value: { capabilities: { ...entry.capabilities } },
+				})),
+			mutate: vi.fn(async () => undefined),
+		};
+		settingsInjection!({
+			get: vi.fn((name: string) => (name === "settings" ? service : undefined)),
+			on: vi.fn((_event: string, listener: (ns: string, revision: number) => void) => {
+				listeners.add(listener);
+				return () => {
+					listeners.delete(listener);
+				};
+			}),
+			effect: vi.fn((setup: () => unknown) => setup()),
+			inject: vi.fn(),
+		} as unknown as Context);
+
+		set(foreignEntry, { codexSearch: true });
+		await Promise.resolve();
+		expect(registerSearchProvider).not.toHaveBeenCalled();
+		set("llm-grok-build-oauth", { codexSearch: true });
+		await Promise.resolve();
+		expect(registerSearchProvider).toHaveBeenCalledOnce();
 	});
 
 	it("aborts the Imagine client before asynchronous media cleanup during injected-service teardown", async () => {
