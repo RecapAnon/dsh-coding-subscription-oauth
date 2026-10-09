@@ -288,7 +288,13 @@ export declare class CapabilitySettingsController {
     private documentEventsDisposer;
     private resolvedNamespace;
     private localRevision;
-    private lastSnapshot;
+    /**
+     * Last snapshot delivered to listeners. Kept apart from plain reads so a
+     * `snapshot()`/`current()` that first observes an external edit (0.2.x hosts emit
+     * `settings/document-updated` from inside `describe()`) cannot hide the change
+     * from the deferred reconcile that event queues.
+     */
+    private lastPublished;
     private disposed;
     constructor(options?: CapabilitySettingsControllerOptions);
     /** Current revision-bearing snapshot. Re-reads the injected provider when present. */

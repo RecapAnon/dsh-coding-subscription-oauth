@@ -87,6 +87,44 @@ describe("capability settings document events", () => {
 		expect(controller.current()).toEqual({ ...DEFAULT_CAPABILITY_SETTINGS, codexFast: true });
 	});
 
+	it("publishes an external edit first observed by snapshot() while describe() emits the event", async () => {
+		const events = eventSource();
+		/** DSH 0.2.0-rc.2 announces a changed document from inside describe(). */
+		class EmittingHost extends FormHost {
+			private announced = 0;
+			override describe(): CapabilitySettingsDescriptor[] {
+				const descriptors = super.describe();
+				if (this.revision !== this.announced) {
+					this.announced = this.revision;
+					events.emit(ENTRY, this.revision);
+				}
+				return descriptors;
+			}
+		}
+		const host = new EmittingHost();
+		const controller = createCapabilitySettingsController({
+			settings: host,
+			entryNamespace: ENTRY,
+			documentEvents: events,
+		});
+		const seen = vi.fn();
+		controller.subscribe(seen);
+
+		host.external({ codexFast: true });
+		// A route read is the first describe() after the edit, so it raises the event.
+		expect(controller.snapshot().value.codexFast).toBe(true);
+		expect(controller.current().codexFast).toBe(true);
+		expect(seen).not.toHaveBeenCalled();
+		await Promise.resolve();
+		expect(seen).toHaveBeenCalledOnce();
+		expect(seen.mock.calls[0]![0]).toMatchObject({ revision: 1, value: { codexFast: true } });
+
+		// An unchanged reconcile must not deliver the same snapshot again.
+		expect(controller.reconcile().value.codexFast).toBe(true);
+		await Promise.resolve();
+		expect(seen).toHaveBeenCalledOnce();
+	});
+
 	it("ignores events for another profile entry", async () => {
 		const host = new FormHost();
 		const events = eventSource();

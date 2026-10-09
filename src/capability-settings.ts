@@ -473,7 +473,13 @@ export class CapabilitySettingsController {
 	private documentEventsDisposer: (() => void) | undefined;
 	private resolvedNamespace: string | undefined;
 	private localRevision = 0;
-	private lastSnapshot: CapabilitySettingsSnapshot;
+	/**
+	 * Last snapshot delivered to listeners. Kept apart from plain reads so a
+	 * `snapshot()`/`current()` that first observes an external edit (0.2.x hosts emit
+	 * `settings/document-updated` from inside `describe()`) cannot hide the change
+	 * from the deferred reconcile that event queues.
+	 */
+	private lastPublished: CapabilitySettingsSnapshot;
 	private disposed = false;
 
 	constructor(options: CapabilitySettingsControllerOptions = {}) {
@@ -487,14 +493,12 @@ export class CapabilitySettingsController {
 		this.onListenerError = options.onListenerError ?? (() => undefined);
 		this.attachScope();
 		this.attachDocumentEvents(options.documentEvents);
-		this.lastSnapshot = this.readSnapshot();
+		this.lastPublished = this.readSnapshot();
 	}
 
 	/** Current revision-bearing snapshot. Re-reads the injected provider when present. */
 	snapshot(): CapabilitySettingsSnapshot {
-		const next = this.readSnapshot();
-		this.lastSnapshot = next;
-		return next;
+		return this.readSnapshot();
 	}
 
 	/** Resolved capability section (schema defaults ← YAML base ← user). */
@@ -537,7 +541,7 @@ export class CapabilitySettingsController {
 	reconcile(): CapabilitySettingsSnapshot {
 		const next = this.readSnapshot();
 		this.publish(next);
-		return this.lastSnapshot;
+		return this.lastPublished;
 	}
 
 	/** Drop the register() watcher, the document-event watcher and every listener. Further writes fail. */
@@ -717,7 +721,7 @@ export class CapabilitySettingsController {
 		this.localRevision = current.revision + 1;
 		const next = this.readSnapshot();
 		this.publish(next);
-		return this.lastSnapshot;
+		return this.lastPublished;
 	}
 
 	private readSnapshot(): CapabilitySettingsSnapshot {
@@ -823,11 +827,11 @@ export class CapabilitySettingsController {
 	}
 
 	private publish(next: CapabilitySettingsSnapshot): void {
-		if (sameSnapshot(this.lastSnapshot, next)) {
-			this.lastSnapshot = next;
+		if (sameSnapshot(this.lastPublished, next)) {
+			this.lastPublished = next;
 			return;
 		}
-		this.lastSnapshot = next;
+		this.lastPublished = next;
 		for (const listener of [...this.listeners]) {
 			try {
 				const result = listener(next);
