@@ -28,6 +28,7 @@ All notable changes to `dsh-coding-subscription-oauth` are documented here, foll
 - Re-verify the BOM against DSH `0.1.7-rc.2`: `@deepseek-ai/dsh-*` `0.1.7-rc.2`, `@deepseek-ai/cordis` `4.0.4`, `@deepseek-ai/schemastery` `3.18.4`, `@earendil-works/pi-ai` `0.85.1` (the stale `0.84.2` override in `pnpm-workspace.yaml` conflicted with the host's `^0.85.1`).
 - Split the compatibility contract: `compatibility/dsh-bom.json` and `devDependencies` keep exact tested versions, while `peerDependencies` carry the accepted host range. `build/verify-dsh-bom.mjs` and `build/verify-release.mjs` now reject an exact DSH peer pin rather than requiring one, and `tests/compatibility.spec.ts` guards against a regression.
 - Update the `adapter.spec.ts` image fixture to the `ImageRequestTarget` / `RequestImageAttachment` contract, asserting the projected `2048x2048` target so the route's pixel budget stays covered.
+- Fold the OpenCode Go connection card by default: a native Edit/Collapse toggle (`aria-expanded`/`aria-controls`) reveals the provider id hint and connection form, while the folded card shows the call status and a model-count summary. Folded details stay mounted, so unsaved drafts and pending actions survive, and the error alert keeps its retry button while folded. The card title is now an `h3` that names the card, matching the sibling provider cards (adapted from upstream `93558ab`).
 
 ## v0.8.5 - 2026-09-15
 
