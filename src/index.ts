@@ -27,10 +27,12 @@ import {
 	type CapabilityToolRegistry,
 } from "./capability-runtime.ts";
 import {
+	type CapabilitySettingsDocumentEvents,
 	type CapabilitySettingsPatch,
 	CapabilitySettingsSchema,
 	type CapabilitySettingsService,
 	type CapabilityVolatileSection,
+	capabilityEntryNamespace,
 	createCapabilitySettingsController,
 	resolveCapabilitySettings,
 } from "./capability-settings.ts";
@@ -504,6 +506,9 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 	const logger = ctx.logger(name);
 	const capabilityBase = readCapabilitySection(config.capabilities);
 	const capabilityVolatile = capabilityVolatileReader(config.capabilities);
+	// DSH 0.2.x addresses settings by profile plugin entry id. Prefer the id the loader
+	// actually assigned to this plugin's entry; the composed default id is `name`.
+	const capabilityEntry = capabilityEntryNamespace(ctx) ?? name;
 	const baseCapabilities = resolveCapabilitySettings(capabilityBase);
 	const runtime = new CapabilityRuntimeState(baseCapabilities, () => {
 		logger.warn("an optional capability listener failed");
@@ -599,9 +604,10 @@ async function applyOwned(ctx: Context, config: Config): Promise<void> {
 		const previousController = capabilityController;
 		const controller = createCapabilitySettingsController({
 			settings: settingsCtx.get("settings") as CapabilitySettingsService,
-			// DSH 0.2.x addresses settings by profile plugin entry id: this plugin's
-			// composed entry is `name`, the same id the loader assigns in cordis.yml.
-			entryNamespace: name,
+			entryNamespace: capabilityEntry,
+			// External edits on 0.2.x form hosts arrive as `settings/document-updated`;
+			// the controller releases this listener in dispose() with the rest of the bridge.
+			documentEvents: settingsCtx as unknown as CapabilitySettingsDocumentEvents,
 			...(capabilityVolatile === undefined ? {} : { volatileSection: capabilityVolatile }),
 			...(capabilityBase === undefined ? {} : { base: capabilityBase }),
 			onListenerError: () => logger.warn("a capability settings listener failed"),

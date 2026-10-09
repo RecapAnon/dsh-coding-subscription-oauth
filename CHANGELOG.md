@@ -16,6 +16,7 @@ All notable changes to `dsh-coding-subscription-oauth` are documented here, foll
 - Type replayed gateway tool-call arguments as pi-ai's `JsonObject`, matching the tightened `ToolCall` contract in pi-ai 0.87.
 - Build provider-stream test contexts through `normalizeContext()` and report the attachment request version's exact `bytes`, so the new request-image budget guard sees a real size instead of demanding an offload.
 - Stream local gateway Grok models through the Grok Build request provider with a `normalizeContext()` transcript, the resolved OAuth token, and the CLI fingerprint headers, instead of asking the xai login collection for an inference provider it never registers.
+- Reconcile capability settings edited outside the plugin on DSH 0.2.x: a `settings/document-updated` event for the owning profile entry now refreshes the live capability runtime (coalesced per microtask, other entries ignored, listener released with the settings bridge). The owning entry id is read from the loader entry on the plugin context, falling back to `llm-grok-build-oauth`, and capability writes reject an `expectedRevision` that is not a non-negative integer.
 
 ### Fixed
 

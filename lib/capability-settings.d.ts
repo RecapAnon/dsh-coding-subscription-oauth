@@ -182,10 +182,35 @@ export interface CapabilitySettingsPathOp {
 export interface CapabilityVolatileSection<T> {
     get(): T | undefined;
 }
+/** Host event emitted after one profile entry's form document changed (DSH 0.2.x). */
+export declare const CAPABILITY_SETTINGS_DOCUMENT_EVENT = "settings/document-updated";
+/**
+ * Structural subset of a Cordis context that can observe 0.2.x settings document
+ * events. The listener receives the profile entry id and its new revision; the
+ * returned value is the listener disposer.
+ */
+export interface CapabilitySettingsDocumentEvents {
+    on(name: typeof CAPABILITY_SETTINGS_DOCUMENT_EVENT, listener: (ns: string, revision: number) => void): unknown;
+}
+/**
+ * Profile entry id owning a plugin context. Injected child contexts inherit the
+ * loader entry of an ancestor, so follow `fiber.parent.fiber` until one carries
+ * `fiber.entry.options.id`. Only non-empty strings are accepted; cycles stop the walk.
+ * @param context - the plugin (or injected child) context.
+ * @returns the owning entry id, or undefined when no loader entry is visible.
+ */
+export declare function capabilityEntryNamespace(context: unknown): string | undefined;
 /** Construction options. `base` is the YAML / composition entry layered under the user section. */
 export interface CapabilitySettingsControllerOptions {
     readonly settings?: CapabilitySettingsService | undefined;
     readonly base?: CapabilitySettingsPatch | undefined;
+    /**
+     * Event source (normally the settings injection context) for 0.2.x hosts. When the
+     * service has no `register()` watcher, `settings/document-updated` for the owning
+     * entry triggers {@link CapabilitySettingsController.reconcile}. Ignored when absent
+     * or when the host does not expose `on()`.
+     */
+    readonly documentEvents?: CapabilitySettingsDocumentEvents | undefined;
     /**
      * Live reader for a volatile Config section. Preferred over `describe()` because it
      * is the value the Host actually committed into this plugin's fiber.
@@ -260,6 +285,7 @@ export declare class CapabilitySettingsController {
     private readonly listeners;
     private scope;
     private scopeDisposer;
+    private documentEventsDisposer;
     private resolvedNamespace;
     private localRevision;
     private lastSnapshot;
@@ -289,9 +315,17 @@ export declare class CapabilitySettingsController {
      * listeners when the secret-free snapshot moved.
      */
     reconcile(): CapabilitySettingsSnapshot;
-    /** Drop the register() watcher and every listener. Further writes fail. */
+    /** Drop the register() watcher, the document-event watcher and every listener. Further writes fail. */
     dispose(): void;
     private attachScope;
+    /**
+     * 0.2.x form hosts have no `register()` watcher; they announce external edits
+     * (Settings UI, another client, a config reload) with `settings/document-updated`.
+     * Only the entry this controller reads is followed. The host's own `describe()`
+     * may emit synchronously, so reconcile is deferred and coalesced in a microtask.
+     * Skipped when a `register()` scope already watches, so one edit reconciles once.
+     */
+    private attachDocumentEvents;
     /**
      * Whether the attached service is the 0.2.x form model: one descriptor per profile
      * plugin entry, no dynamic `register()`. There the capability section is this

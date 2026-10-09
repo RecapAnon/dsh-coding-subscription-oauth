@@ -189,10 +189,53 @@ export interface CapabilityVolatileSection<T> {
 	get(): T | undefined;
 }
 
+/** Host event emitted after one profile entry's form document changed (DSH 0.2.x). */
+export const CAPABILITY_SETTINGS_DOCUMENT_EVENT = "settings/document-updated";
+
+/**
+ * Structural subset of a Cordis context that can observe 0.2.x settings document
+ * events. The listener receives the profile entry id and its new revision; the
+ * returned value is the listener disposer.
+ */
+export interface CapabilitySettingsDocumentEvents {
+	on(name: typeof CAPABILITY_SETTINGS_DOCUMENT_EVENT, listener: (ns: string, revision: number) => void): unknown;
+}
+
+/**
+ * Profile entry id owning a plugin context. Injected child contexts inherit the
+ * loader entry of an ancestor, so follow `fiber.parent.fiber` until one carries
+ * `fiber.entry.options.id`. Only non-empty strings are accepted; cycles stop the walk.
+ * @param context - the plugin (or injected child) context.
+ * @returns the owning entry id, or undefined when no loader entry is visible.
+ */
+export function capabilityEntryNamespace(context: unknown): string | undefined {
+	try {
+		let fiber: unknown = asRecord(context)?.["fiber"];
+		const seen = new Set<unknown>();
+		while (fiber !== undefined && fiber !== null && !seen.has(fiber)) {
+			seen.add(fiber);
+			const current = asRecord(fiber);
+			const id = asRecord(asRecord(current?.["entry"])?.["options"])?.["id"];
+			if (typeof id === "string" && id.length > 0) return id;
+			fiber = asRecord(current?.["parent"])?.["fiber"];
+		}
+	} catch {
+		// A hostile or partially torn-down context must not break startup.
+	}
+	return undefined;
+}
+
 /** Construction options. `base` is the YAML / composition entry layered under the user section. */
 export interface CapabilitySettingsControllerOptions {
 	readonly settings?: CapabilitySettingsService | undefined;
 	readonly base?: CapabilitySettingsPatch | undefined;
+	/**
+	 * Event source (normally the settings injection context) for 0.2.x hosts. When the
+	 * service has no `register()` watcher, `settings/document-updated` for the owning
+	 * entry triggers {@link CapabilitySettingsController.reconcile}. Ignored when absent
+	 * or when the host does not expose `on()`.
+	 */
+	readonly documentEvents?: CapabilitySettingsDocumentEvents | undefined;
 	/**
 	 * Live reader for a volatile Config section. Preferred over `describe()` because it
 	 * is the value the Host actually committed into this plugin's fiber.
@@ -427,6 +470,7 @@ export class CapabilitySettingsController {
 	private readonly listeners = new Set<CapabilitySettingsListener>();
 	private scope: CapabilitySettingsScope | undefined;
 	private scopeDisposer: (() => void) | undefined;
+	private documentEventsDisposer: (() => void) | undefined;
 	private resolvedNamespace: string | undefined;
 	private localRevision = 0;
 	private lastSnapshot: CapabilitySettingsSnapshot;
@@ -442,6 +486,7 @@ export class CapabilitySettingsController {
 		this.volatileSection = options.volatileSection;
 		this.onListenerError = options.onListenerError ?? (() => undefined);
 		this.attachScope();
+		this.attachDocumentEvents(options.documentEvents);
 		this.lastSnapshot = this.readSnapshot();
 	}
 
@@ -495,18 +540,22 @@ export class CapabilitySettingsController {
 		return this.lastSnapshot;
 	}
 
-	/** Drop the register() watcher and every listener. Further writes fail. */
+	/** Drop the register() watcher, the document-event watcher and every listener. Further writes fail. */
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
 		const releaseScope = this.scopeDisposer;
+		const releaseDocumentEvents = this.documentEventsDisposer;
 		this.scopeDisposer = undefined;
+		this.documentEventsDisposer = undefined;
 		this.scope = undefined;
 		this.listeners.clear();
-		try {
-			releaseScope?.();
-		} catch (error: unknown) {
-			this.onListenerError(error);
+		for (const release of [releaseDocumentEvents, releaseScope]) {
+			try {
+				release?.();
+			} catch (error: unknown) {
+				this.onListenerError(error);
+			}
 		}
 	}
 
@@ -522,6 +571,45 @@ export class CapabilitySettingsController {
 			if (this.disposed) return;
 			this.reconcile();
 		});
+	}
+
+	/**
+	 * 0.2.x form hosts have no `register()` watcher; they announce external edits
+	 * (Settings UI, another client, a config reload) with `settings/document-updated`.
+	 * Only the entry this controller reads is followed. The host's own `describe()`
+	 * may emit synchronously, so reconcile is deferred and coalesced in a microtask.
+	 * Skipped when a `register()` scope already watches, so one edit reconciles once.
+	 */
+	private attachDocumentEvents(events: CapabilitySettingsDocumentEvents | undefined): void {
+		if (events === undefined || !this.entryScoped) return;
+		const on = (events as { on?: unknown }).on;
+		if (typeof on !== "function") return;
+		const ns = this.hostNamespace();
+		let queued = false;
+		let stop: unknown;
+		try {
+			stop = on.call(events, CAPABILITY_SETTINGS_DOCUMENT_EVENT, (updated: unknown) => {
+				if (this.disposed || queued || updated !== ns) return;
+				queued = true;
+				queueMicrotask(() => {
+					queued = false;
+					if (this.disposed) return;
+					try {
+						this.reconcile();
+					} catch (error: unknown) {
+						this.onListenerError(error);
+					}
+				});
+			});
+		} catch {
+			// A host without this event keeps the explicit snapshot()/reconcile() path.
+			return;
+		}
+		if (typeof stop === "function") {
+			this.documentEventsDisposer = () => {
+				(stop as () => unknown)();
+			};
+		}
 	}
 
 	/**
@@ -599,6 +687,9 @@ export class CapabilitySettingsController {
 		const reason = this.writeReason();
 		if (reason !== undefined) throw new CapabilitySettingsReadOnlyError(reason);
 		assertCapabilitySettingsPatch(input, `capability settings ${mode}`);
+		if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+			throw new TypeError("capability settings expectedRevision must be a non-negative integer");
+		}
 		const current = this.readSnapshot();
 		if (expectedRevision !== current.revision) {
 			throw new CapabilitySettingsConflictError(expectedRevision, current.revision);
@@ -771,6 +862,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const proto = Object.getPrototypeOf(value);
 	return proto === Object.prototype || proto === null;
+}
+
+/** Any non-null object (contexts and fibers are class instances, not plain objects). */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
 }
 
 /**

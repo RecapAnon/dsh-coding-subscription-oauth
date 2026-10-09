@@ -1,9 +1,12 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import type { Context } from "@deepseek-ai/cordis";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CODING_OAUTH_STATUS_PATH } from "../src/auth-routes.ts";
 import { CAPABILITY_SETTINGS_PATH } from "../src/capability-routes.ts";
 import type {
 	CapabilitySettingsPatch,
+	CapabilitySettingsPathOp,
 	CapabilitySettingsScope,
 	CapabilitySettingsService,
 } from "../src/capability-settings.ts";
@@ -300,6 +303,175 @@ describe("plugin startup catalog initialization", () => {
 		expect(registerSearchProvider).toHaveBeenCalledTimes(2);
 		releaseSecond();
 		expect(second.watcherCount()).toBe(0);
+		expect(searchReleases[1]).toHaveBeenCalledOnce();
+	});
+
+	it("follows document events for a context-derived entry id and releases them across settings churn", async () => {
+		vi.spyOn(GrokBuildSession.prototype, "loadCachedCatalog").mockResolvedValue(undefined);
+		vi.spyOn(OAuthProviderSession.prototype, "loadCachedModels").mockResolvedValue(undefined);
+		vi.spyOn(GrokBuildSession.prototype, "refreshLiveCatalog").mockResolvedValue(undefined);
+		const entryNamespace = "custom-oauth-entry";
+		const registration = Object.assign(vi.fn(), { replace: vi.fn() });
+		const searchReleases: ReturnType<typeof vi.fn>[] = [];
+		const registerSearchProvider = vi.fn(() => {
+			const release = vi.fn();
+			searchReleases.push(release);
+			return release;
+		});
+		const routes = new Map<string, (req: IncomingMessage, res: ServerResponse) => void | Promise<void>>();
+		const webServerCtx = {
+			webServer: {
+				register: vi.fn((route: { path: string; handler: (req: IncomingMessage, res: ServerResponse) => void }) => {
+					routes.set(route.path, route.handler);
+					return () => {
+						routes.delete(route.path);
+					};
+				}),
+			},
+			get: vi.fn(() => undefined),
+			effect: vi.fn((setup: () => unknown) => setup()),
+		} as unknown as Context;
+		let settingsInjection: ((ctx: Context) => void) | undefined;
+		const webCtx = {
+			get: vi.fn((service: string) => (service === "web" ? { registerSearchProvider } : undefined)),
+			effect: vi.fn((setup: () => unknown) => setup()),
+		} as unknown as Context;
+		// The loader entry sits on an ancestor fiber; the owned runtime is an injected child.
+		const root = { fiber: { entry: { id: "nested/path", options: { id: entryNamespace } } } };
+		const context = {
+			fiber: { parent: root },
+			webServer: webServerCtx.webServer,
+			logger: () => ({ warn: vi.fn() }),
+			emit: vi.fn(),
+			effect: vi.fn((setup: () => unknown) => setup()),
+			llm: { registerAdapter: vi.fn(() => registration) },
+			get: vi.fn(() => undefined),
+			inject: vi.fn((services: readonly string[], callback: (ctx: Context) => void) => {
+				if (services.length === 0) return runFiber(() => callback(context));
+				if (services.length === 1 && services[0] === "llm") return runFiber(() => callback(context));
+				if (services.length === 1 && services[0] === "settings") {
+					settingsInjection = callback;
+					return runFiber();
+				}
+				if (services.length === 1 && services[0] === "web") return runFiber(() => callback(webCtx));
+				if (services.length === 1 && services[0] === "webServer") return runFiber(() => callback(webServerCtx));
+				return runFiber();
+			}),
+		} as unknown as Context;
+
+		apply(context, { capabilities: { codexSearch: false } });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(settingsInjection).toBeDefined();
+		expect(registerSearchProvider).not.toHaveBeenCalled();
+
+		const attach = () => {
+			const entries: Record<string, { capabilities: CapabilitySettingsPatch; revision: number }> = {
+				// The hard-coded default id must not be read or written once the loader names the entry.
+				"llm-grok-build-oauth": { capabilities: { codexSearch: true }, revision: 50 },
+				[entryNamespace]: { capabilities: { codexSearch: false }, revision: 0 },
+			};
+			const listeners = new Set<(ns: string, revision: number) => void>();
+			const emit = (ns: string): void => {
+				for (const listener of [...listeners]) listener(ns, entries[ns]!.revision);
+			};
+			const mutate = vi.fn(async (ns: string, ops: readonly CapabilitySettingsPathOp[], expected?: number) => {
+				const entry = entries[ns];
+				if (entry === undefined || expected !== entry.revision) throw new Error("rejected write");
+				const next: Record<string, unknown> = { ...entry.capabilities };
+				for (const op of ops) if (op.path.length === 2) next[op.path[1]!] = op.value;
+				entry.capabilities = next as CapabilitySettingsPatch;
+				entry.revision++;
+				emit(ns);
+			});
+			const service: CapabilitySettingsService = {
+				writable: true,
+				describe: () =>
+					Object.entries(entries).map(([ns, entry]) => ({
+						ns,
+						revision: entry.revision,
+						value: { capabilities: { ...entry.capabilities } },
+						base: { capabilities: {} },
+						user: { capabilities: { ...entry.capabilities } },
+					})),
+				mutate,
+			};
+			let release = (): void => undefined;
+			settingsInjection!({
+				get: vi.fn((name: string) => (name === "settings" ? service : undefined)),
+				on: vi.fn((event: string, listener: (ns: string, revision: number) => void) => {
+					expect(event).toBe("settings/document-updated");
+					listeners.add(listener);
+					return () => {
+						listeners.delete(listener);
+					};
+				}),
+				effect: vi.fn((setup: () => () => void) => {
+					release = setup();
+				}),
+				inject: vi.fn(),
+			} as unknown as Context);
+			return {
+				mutate,
+				count: () => listeners.size,
+				release: () => release(),
+				set(ns: string, capabilities: CapabilitySettingsPatch) {
+					entries[ns]!.capabilities = capabilities;
+					entries[ns]!.revision++;
+					emit(ns);
+				},
+			};
+		};
+
+		const first = attach();
+		expect(first.count()).toBe(1);
+		expect(registerSearchProvider).not.toHaveBeenCalled();
+		// Events for another entry never reconcile.
+		first.set("llm-grok-build-oauth", { codexSearch: true });
+		await Promise.resolve();
+		expect(registerSearchProvider).not.toHaveBeenCalled();
+		first.set(entryNamespace, { codexSearch: true });
+		await Promise.resolve();
+		expect(registerSearchProvider).toHaveBeenCalledOnce();
+
+		// Writes address the context-derived entry with its revision.
+		const req = Readable.from([JSON.stringify({ expectedRevision: 1, patch: { codexImages: true } })]);
+		Object.defineProperties(req, {
+			method: { value: "PATCH" },
+			headers: { value: { host: "127.0.0.1:3080", origin: "http://127.0.0.1:3080" } },
+			socket: { value: { remoteAddress: "127.0.0.1" } },
+		});
+		const res = { status: 0, body: "", writeHead: vi.fn(), end: vi.fn() };
+		res.writeHead.mockImplementation((status: number) => {
+			res.status = status;
+			return res;
+		});
+		res.end.mockImplementation((body?: string) => {
+			res.body += body ?? "";
+			return res;
+		});
+		await routes.get(CAPABILITY_SETTINGS_PATH)!(req as unknown as IncomingMessage, res as unknown as ServerResponse);
+		expect(res.status).toBe(200);
+		expect(JSON.parse(res.body)).toMatchObject({ revision: 2, value: { codexSearch: true, codexImages: true } });
+		expect(first.mutate).toHaveBeenCalledWith(
+			entryNamespace,
+			[{ op: "set", path: ["capabilities", "codexImages"], value: true }],
+			1,
+		);
+
+		const second = attach();
+		expect(first.count()).toBe(0);
+		expect(second.count()).toBe(1);
+		expect(searchReleases[0]).toHaveBeenCalledOnce();
+		first.release(); // A late obsolete fiber disposer must not release the new bridge.
+		expect(second.count()).toBe(1);
+		first.set(entryNamespace, { codexSearch: true });
+		await Promise.resolve();
+		expect(registerSearchProvider).toHaveBeenCalledOnce();
+		second.set(entryNamespace, { codexSearch: true });
+		await Promise.resolve();
+		expect(registerSearchProvider).toHaveBeenCalledTimes(2);
+		second.release();
+		expect(second.count()).toBe(0);
 		expect(searchReleases[1]).toHaveBeenCalledOnce();
 	});
 
